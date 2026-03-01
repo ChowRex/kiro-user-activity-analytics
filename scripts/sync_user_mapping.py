@@ -51,7 +51,8 @@ def get_display_name(user_id):
     try:
         user = ids.describe_user(IdentityStoreId=identity_store_id, UserId=user_id)
         return user.get('DisplayName', '') or user.get('UserName', '') or user_id
-    except Exception:
+    except Exception as e:
+        print(f"    ✗ DescribeUser 失败: {e}")
         return user_id
 
 

@@ -169,13 +169,13 @@ echo ""
 fi # step 2
 
 # ============================================
-# 3. 通过 Athena DDL 创建外部表（替代 Glue Crawler）
+# 3. 通过 Glue API 创建外部表（替代 Glue Crawler）
 # ============================================
 if [ "$FROM_STEP" -le 3 ]; then
-echo "3️⃣  通过 Athena DDL 创建外部表..."
+echo "3️⃣  通过 Glue API 创建外部表..."
 
 python3 -c "
-import boto3, time, sys, yaml
+import boto3, yaml, sys
 
 config = yaml.safe_load(open('config.yaml'))
 region = config['aws']['region']
@@ -184,93 +184,131 @@ bucket = config['s3']['bucket_name']
 prefix = config['s3']['prefix']
 glue_db = config['glue']['database_name']
 
-athena = boto3.client('athena', region_name=region)
 glue = boto3.client('glue', region_name=region)
 
-WORKGROUP = 'kiro-analytics-workgroup'
+CSV_SERDE = {
+    'SerializationLibrary': 'org.apache.hadoop.hive.serde2.OpenCSVSerde',
+    'Parameters': {'separatorChar': ',', 'quoteChar': '\"', 'escapeChar': '\\\\'}
+}
+INPUT_FMT = 'org.apache.hadoop.mapred.TextInputFormat'
+OUTPUT_FMT = 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
 
-def run_ddl(sql, desc):
-    r = athena.start_query_execution(QueryString=sql, WorkGroup=WORKGROUP)
-    qid = r['QueryExecutionId']
-    while True:
-        s = athena.get_query_execution(QueryExecutionId=qid)['QueryExecution']['Status']['State']
-        if s == 'SUCCEEDED':
-            print(f'  ✓ {desc}')
-            return True
-        elif s == 'FAILED':
-            reason = athena.get_query_execution(QueryExecutionId=qid)['QueryExecution']['Status'].get('StateChangeReason','')
-            print(f'  ✗ {desc}: {reason}')
-            return False
-        time.sleep(2)
+def create_table(name, columns, s3_path):
+    table_input = {
+        'Name': name,
+        'StorageDescriptor': {
+            'Columns': columns,
+            'Location': s3_path,
+            'InputFormat': INPUT_FMT,
+            'OutputFormat': OUTPUT_FMT,
+            'SerdeInfo': CSV_SERDE,
+        },
+        'TableType': 'EXTERNAL_TABLE',
+        'Parameters': {'skip.header.line.count': '1', 'classification': 'csv'}
+    }
+    try:
+        glue.create_table(DatabaseName=glue_db, TableInput=table_input)
+        print(f'  ✓ {name} 表创建成功')
+    except glue.exceptions.AlreadyExistsException:
+        # 旧 Crawler 建的表可能带分区列，无法直接更新，先删后建
+        try:
+            glue.delete_table(DatabaseName=glue_db, Name=name)
+            glue.create_table(DatabaseName=glue_db, TableInput=table_input)
+            print(f'  ✓ {name} 表已重建（删除旧表并重新创建）')
+        except Exception as e:
+            print(f'  ✗ {name} 表重建失败: {e}')
+            sys.exit(1)
 
-# by_user_analytic 表
-run_ddl(f'''
-CREATE EXTERNAL TABLE IF NOT EXISTS {glue_db}.by_user_analytic (
-    date STRING,
-    userid STRING,
-    chat_aicodelines BIGINT,
-    chat_messagesinteracted BIGINT,
-    chat_messagessent BIGINT,
-    inline_aicodelines BIGINT,
-    inline_acceptancecount BIGINT,
-    inline_suggestionscount BIGINT,
-    codefix_generationeventcount BIGINT,
-    codefix_acceptanceeventcount BIGINT,
-    codefix_generatedlines BIGINT,
-    codefix_acceptedlines BIGINT,
-    codereview_findingscount BIGINT,
-    codereview_succeededeventcount BIGINT,
-    codereview_failedeventcount BIGINT,
-    dev_generationeventcount BIGINT,
-    dev_acceptanceeventcount BIGINT,
-    dev_generatedlines BIGINT,
-    dev_acceptedlines BIGINT,
-    testgeneration_eventcount BIGINT,
-    testgeneration_acceptedtests BIGINT,
-    testgeneration_generatedtests BIGINT,
-    testgeneration_generatedlines BIGINT,
-    testgeneration_acceptedlines BIGINT,
-    inlinechat_totaleventcount BIGINT,
-    inlinechat_acceptanceeventcount BIGINT,
-    inlinechat_acceptedlineadditions BIGINT,
-    inlinechat_acceptedlinedeletions BIGINT,
-    docgeneration_eventcount BIGINT,
-    docgeneration_acceptedfilescreations BIGINT,
-    docgeneration_acceptedlineadditions BIGINT,
-    transformation_eventcount BIGINT,
-    transformation_linesgenerated BIGINT
-)
-ROW FORMAT SERDE \"org.apache.hadoop.hive.serde2.OpenCSVSerde\"
-WITH SERDEPROPERTIES (\"separatorChar\" = \",\", \"quoteChar\" = \"\\\"\", \"escapeChar\" = \"\\\\\")
-STORED AS TEXTFILE
-LOCATION \"s3://{bucket}/{prefix}AWSLogs/{account_id}/KiroLogs/by_user_analytic/\"
-TBLPROPERTIES (\"skip.header.line.count\" = \"1\")
-''', 'by_user_analytic 表')
+# by_user_analytic 表 (按 CSV header 实际列顺序，OpenCSVSerde 全部为 string)
+create_table('by_user_analytic', [
+    {'Name': 'userid', 'Type': 'string'},
+    {'Name': 'date', 'Type': 'string'},
+    {'Name': 'chat_aicodelines', 'Type': 'string'},
+    {'Name': 'chat_messagesinteracted', 'Type': 'string'},
+    {'Name': 'chat_messagessent', 'Type': 'string'},
+    {'Name': 'codefix_acceptanceeventcount', 'Type': 'string'},
+    {'Name': 'codefix_acceptedlines', 'Type': 'string'},
+    {'Name': 'codefix_generatedlines', 'Type': 'string'},
+    {'Name': 'codefix_generationeventcount', 'Type': 'string'},
+    {'Name': 'codereview_failedeventcount', 'Type': 'string'},
+    {'Name': 'codereview_findingscount', 'Type': 'string'},
+    {'Name': 'codereview_succeededeventcount', 'Type': 'string'},
+    {'Name': 'dev_acceptanceeventcount', 'Type': 'string'},
+    {'Name': 'dev_acceptedlines', 'Type': 'string'},
+    {'Name': 'dev_generatedlines', 'Type': 'string'},
+    {'Name': 'dev_generationeventcount', 'Type': 'string'},
+    {'Name': 'docgeneration_acceptedfileupdates', 'Type': 'string'},
+    {'Name': 'docgeneration_acceptedfilescreations', 'Type': 'string'},
+    {'Name': 'docgeneration_acceptedlineadditions', 'Type': 'string'},
+    {'Name': 'docgeneration_acceptedlineupdates', 'Type': 'string'},
+    {'Name': 'docgeneration_eventcount', 'Type': 'string'},
+    {'Name': 'docgeneration_rejectedfilecreations', 'Type': 'string'},
+    {'Name': 'docgeneration_rejectedfileupdates', 'Type': 'string'},
+    {'Name': 'docgeneration_rejectedlineadditions', 'Type': 'string'},
+    {'Name': 'docgeneration_rejectedlineupdates', 'Type': 'string'},
+    {'Name': 'inlinechat_acceptanceeventcount', 'Type': 'string'},
+    {'Name': 'inlinechat_acceptedlineadditions', 'Type': 'string'},
+    {'Name': 'inlinechat_acceptedlinedeletions', 'Type': 'string'},
+    {'Name': 'inlinechat_dismissaleventcount', 'Type': 'string'},
+    {'Name': 'inlinechat_dismissedlineadditions', 'Type': 'string'},
+    {'Name': 'inlinechat_dismissedlinedeletions', 'Type': 'string'},
+    {'Name': 'inlinechat_rejectedlineadditions', 'Type': 'string'},
+    {'Name': 'inlinechat_rejectedlinedeletions', 'Type': 'string'},
+    {'Name': 'inlinechat_rejectioneventcount', 'Type': 'string'},
+    {'Name': 'inlinechat_totaleventcount', 'Type': 'string'},
+    {'Name': 'inline_aicodelines', 'Type': 'string'},
+    {'Name': 'inline_acceptancecount', 'Type': 'string'},
+    {'Name': 'inline_suggestionscount', 'Type': 'string'},
+    {'Name': 'testgeneration_acceptedlines', 'Type': 'string'},
+    {'Name': 'testgeneration_acceptedtests', 'Type': 'string'},
+    {'Name': 'testgeneration_eventcount', 'Type': 'string'},
+    {'Name': 'testgeneration_generatedlines', 'Type': 'string'},
+    {'Name': 'testgeneration_generatedtests', 'Type': 'string'},
+    {'Name': 'transformation_eventcount', 'Type': 'string'},
+    {'Name': 'transformation_linesgenerated', 'Type': 'string'},
+    {'Name': 'transformation_linesingested', 'Type': 'string'},
+], f's3://{bucket}/{prefix}AWSLogs/{account_id}/KiroLogs/by_user_analytic/')
 
-# user_report 表
-run_ddl(f'''
-CREATE EXTERNAL TABLE IF NOT EXISTS {glue_db}.user_report (
-    date STRING,
-    userid STRING,
-    client_type STRING,
-    subscription_tier STRING,
-    profileid STRING,
-    total_messages BIGINT,
-    chat_conversations BIGINT,
-    credits_used DOUBLE,
-    overage_enabled STRING,
-    overage_cap DOUBLE,
-    overage_credits_used DOUBLE
-)
-ROW FORMAT SERDE \"org.apache.hadoop.hive.serde2.OpenCSVSerde\"
-WITH SERDEPROPERTIES (\"separatorChar\" = \",\", \"quoteChar\" = \"\\\"\", \"escapeChar\" = \"\\\\\")
-STORED AS TEXTFILE
-LOCATION \"s3://{bucket}/{prefix}AWSLogs/{account_id}/KiroLogs/user_report/\"
-TBLPROPERTIES (\"skip.header.line.count\" = \"1\")
-''', 'user_report 表')
+# user_report 表 (按 CSV header 实际列顺序，OpenCSVSerde 全部为 string)
+# CSV header: Date,UserId,Client_Type,Chat_Conversations,Credits_Used,Overage_Cap,Overage_Credits_Used,Overage_Enabled,ProfileId,Subscription_Tier,Total_Messages
+create_table('user_report', [
+    {'Name': 'date', 'Type': 'string'},
+    {'Name': 'userid', 'Type': 'string'},
+    {'Name': 'client_type', 'Type': 'string'},
+    {'Name': 'chat_conversations', 'Type': 'string'},
+    {'Name': 'credits_used', 'Type': 'string'},
+    {'Name': 'overage_cap', 'Type': 'string'},
+    {'Name': 'overage_credits_used', 'Type': 'string'},
+    {'Name': 'overage_enabled', 'Type': 'string'},
+    {'Name': 'profileid', 'Type': 'string'},
+    {'Name': 'subscription_tier', 'Type': 'string'},
+    {'Name': 'total_messages', 'Type': 'string'},
+], f's3://{bucket}/{prefix}AWSLogs/{account_id}/KiroLogs/user_report/')
 "
 
 echo "✓ 外部表创建完成"
+
+# 删表重建后 Lake Formation 权限会失效，需要重新授权
+echo "  重新授权 Lake Formation 权限（删表重建后必须）..."
+grant_lf_all_tables "IAM_ALLOWED_PRINCIPALS" "ALL" "IAMAllowedPrincipals 表权限"
+
+CALLER_ARN=$(aws sts get-caller-identity --query 'Arn' --output text)
+grant_lf_all_tables "$CALLER_ARN" "SELECT DESCRIBE ALTER" "当前用户查询权限"
+
+grant_lf_all_tables "$QS_ROLE_ARN" "SELECT DESCRIBE" "QuickSight 表权限"
+
+QS_IAM_ROLE=$(python3 -c "
+arn = '$QS_USER_ARN'
+parts = arn.split('/')
+if len(parts) >= 3:
+    print('arn:aws:iam::$ACCOUNT_ID:role/' + parts[-2])
+else:
+    print('')
+")
+if [ -n "$QS_IAM_ROLE" ]; then
+    grant_lf_all_tables "$QS_IAM_ROLE" "SELECT DESCRIBE" "QuickSight 用户角色表权限"
+fi
+
 echo ""
 fi # step 3
 

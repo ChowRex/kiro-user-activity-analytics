@@ -53,29 +53,52 @@ class QuickSightDeployer:
                     'DataSourceArn': ds_arn, 'Catalog': 'AwsDataCatalog',
                     'Schema': db, 'Name': 'by_user_analytic',
                     'InputColumns': [
-                        {'Name': 'date', 'Type': 'STRING'},
                         {'Name': 'userid', 'Type': 'STRING'},
-                        {'Name': 'chat_aicodelines', 'Type': 'INTEGER'},
-                        {'Name': 'chat_messagesinteracted', 'Type': 'INTEGER'},
-                        {'Name': 'chat_messagessent', 'Type': 'INTEGER'},
-                        {'Name': 'inline_aicodelines', 'Type': 'INTEGER'},
-                        {'Name': 'inline_acceptancecount', 'Type': 'INTEGER'},
-                        {'Name': 'inline_suggestionscount', 'Type': 'INTEGER'},
-                        {'Name': 'codefix_generationeventcount', 'Type': 'INTEGER'},
-                        {'Name': 'codefix_acceptanceeventcount', 'Type': 'INTEGER'},
-                        {'Name': 'codereview_findingscount', 'Type': 'INTEGER'},
-                        {'Name': 'codereview_succeededeventcount', 'Type': 'INTEGER'},
-                        {'Name': 'dev_generationeventcount', 'Type': 'INTEGER'},
-                        {'Name': 'dev_acceptanceeventcount', 'Type': 'INTEGER'},
-                        {'Name': 'dev_generatedlines', 'Type': 'INTEGER'},
-                        {'Name': 'testgeneration_eventcount', 'Type': 'INTEGER'},
-                        {'Name': 'testgeneration_acceptedtests', 'Type': 'INTEGER'},
-                        {'Name': 'inlinechat_totaleventcount', 'Type': 'INTEGER'},
-                        {'Name': 'inlinechat_acceptanceeventcount', 'Type': 'INTEGER'},
-                        {'Name': 'docgeneration_eventcount', 'Type': 'INTEGER'},
-                        {'Name': 'docgeneration_acceptedfilescreations', 'Type': 'INTEGER'},
-                        {'Name': 'transformation_eventcount', 'Type': 'INTEGER'},
-                        {'Name': 'transformation_linesgenerated', 'Type': 'INTEGER'},
+                        {'Name': 'date', 'Type': 'STRING'},
+                        {'Name': 'chat_aicodelines', 'Type': 'STRING'},
+                        {'Name': 'chat_messagesinteracted', 'Type': 'STRING'},
+                        {'Name': 'chat_messagessent', 'Type': 'STRING'},
+                        {'Name': 'codefix_acceptanceeventcount', 'Type': 'STRING'},
+                        {'Name': 'codefix_acceptedlines', 'Type': 'STRING'},
+                        {'Name': 'codefix_generatedlines', 'Type': 'STRING'},
+                        {'Name': 'codefix_generationeventcount', 'Type': 'STRING'},
+                        {'Name': 'codereview_failedeventcount', 'Type': 'STRING'},
+                        {'Name': 'codereview_findingscount', 'Type': 'STRING'},
+                        {'Name': 'codereview_succeededeventcount', 'Type': 'STRING'},
+                        {'Name': 'dev_acceptanceeventcount', 'Type': 'STRING'},
+                        {'Name': 'dev_acceptedlines', 'Type': 'STRING'},
+                        {'Name': 'dev_generatedlines', 'Type': 'STRING'},
+                        {'Name': 'dev_generationeventcount', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_acceptedfileupdates', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_acceptedfilescreations', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_acceptedlineadditions', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_acceptedlineupdates', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_eventcount', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_rejectedfilecreations', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_rejectedfileupdates', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_rejectedlineadditions', 'Type': 'STRING'},
+                        {'Name': 'docgeneration_rejectedlineupdates', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_acceptanceeventcount', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_acceptedlineadditions', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_acceptedlinedeletions', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_dismissaleventcount', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_dismissedlineadditions', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_dismissedlinedeletions', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_rejectedlineadditions', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_rejectedlinedeletions', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_rejectioneventcount', 'Type': 'STRING'},
+                        {'Name': 'inlinechat_totaleventcount', 'Type': 'STRING'},
+                        {'Name': 'inline_aicodelines', 'Type': 'STRING'},
+                        {'Name': 'inline_acceptancecount', 'Type': 'STRING'},
+                        {'Name': 'inline_suggestionscount', 'Type': 'STRING'},
+                        {'Name': 'testgeneration_acceptedlines', 'Type': 'STRING'},
+                        {'Name': 'testgeneration_acceptedtests', 'Type': 'STRING'},
+                        {'Name': 'testgeneration_eventcount', 'Type': 'STRING'},
+                        {'Name': 'testgeneration_generatedlines', 'Type': 'STRING'},
+                        {'Name': 'testgeneration_generatedtests', 'Type': 'STRING'},
+                        {'Name': 'transformation_eventcount', 'Type': 'STRING'},
+                        {'Name': 'transformation_linesgenerated', 'Type': 'STRING'},
+                        {'Name': 'transformation_linesingested', 'Type': 'STRING'},
                     ]
                 }
             },
@@ -90,10 +113,25 @@ class QuickSightDeployer:
                 }
             }
         }
+        int_cols = [
+            'chat_aicodelines', 'chat_messagesinteracted', 'chat_messagessent',
+            'codefix_acceptanceeventcount', 'codereview_findingscount',
+            'codereview_succeededeventcount',
+            'dev_acceptanceeventcount', 'dev_generatedlines', 'dev_generationeventcount',
+            'docgeneration_eventcount', 'docgeneration_acceptedfilescreations',
+            'inlinechat_totaleventcount', 'inlinechat_acceptanceeventcount',
+            'inline_aicodelines', 'inline_acceptancecount', 'inline_suggestionscount',
+            'testgeneration_eventcount', 'testgeneration_acceptedtests',
+            'transformation_eventcount', 'transformation_linesgenerated',
+        ]
+        cast_transforms = [{'CastColumnTypeOperation': {
+            'ColumnName': c, 'NewColumnType': 'INTEGER'
+        }} for c in int_cols]
         logical = {
             'activity-base': {
                 'Alias': 'activity_data',
                 'Source': {'PhysicalTableId': 'activity'},
+                'DataTransforms': cast_transforms,
             },
             'mapping-base': {
                 'Alias': 'user_mapping',
@@ -173,14 +211,14 @@ class QuickSightDeployer:
                         {'Name': 'date', 'Type': 'STRING'},
                         {'Name': 'userid', 'Type': 'STRING'},
                         {'Name': 'client_type', 'Type': 'STRING'},
-                        {'Name': 'subscription_tier', 'Type': 'STRING'},
-                        {'Name': 'total_messages', 'Type': 'INTEGER'},
-                        {'Name': 'chat_conversations', 'Type': 'INTEGER'},
-                        {'Name': 'credits_used', 'Type': 'DECIMAL'},
-                        {'Name': 'overage_cap', 'Type': 'DECIMAL'},
-                        {'Name': 'overage_credits_used', 'Type': 'DECIMAL'},
+                        {'Name': 'chat_conversations', 'Type': 'STRING'},
+                        {'Name': 'credits_used', 'Type': 'STRING'},
+                        {'Name': 'overage_cap', 'Type': 'STRING'},
+                        {'Name': 'overage_credits_used', 'Type': 'STRING'},
                         {'Name': 'overage_enabled', 'Type': 'STRING'},
                         {'Name': 'profileid', 'Type': 'STRING'},
+                        {'Name': 'subscription_tier', 'Type': 'STRING'},
+                        {'Name': 'total_messages', 'Type': 'STRING'},
                     ]
                 }
             },
@@ -195,10 +233,18 @@ class QuickSightDeployer:
                 }
             }
         }
+        credits_cast = [
+            {'CastColumnTypeOperation': {'ColumnName': 'total_messages', 'NewColumnType': 'INTEGER'}},
+            {'CastColumnTypeOperation': {'ColumnName': 'chat_conversations', 'NewColumnType': 'INTEGER'}},
+            {'CastColumnTypeOperation': {'ColumnName': 'credits_used', 'NewColumnType': 'DECIMAL'}},
+            {'CastColumnTypeOperation': {'ColumnName': 'overage_cap', 'NewColumnType': 'DECIMAL'}},
+            {'CastColumnTypeOperation': {'ColumnName': 'overage_credits_used', 'NewColumnType': 'DECIMAL'}},
+        ]
         logical = {
             'credits-base': {
                 'Alias': 'credits_data',
                 'Source': {'PhysicalTableId': 'credits'},
+                'DataTransforms': credits_cast,
             },
             'mapping2-base': {
                 'Alias': 'user_mapping2',
