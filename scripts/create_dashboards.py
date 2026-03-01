@@ -13,35 +13,46 @@ class QuickSightDeployer:
         self.account_id = self.config['aws']['account_id']
         
     def create_data_source(self):
-        """创建 Athena 数据源"""
+        """创建 Athena 数据源（如果已存在但状态为 CREATION_FAILED，自动删除重建）"""
+        ds_id = 'kiro-athena-datasource'
+
+        # 检查是否已存在
         try:
-            response = self.qs.create_data_source(
-                AwsAccountId=self.account_id,
-                DataSourceId='kiro-athena-datasource',
-                Name=self.config['quicksight']['data_source_name'],
-                Type='ATHENA',
-                DataSourceParameters={
-                    'AthenaParameters': {
-                        'WorkGroup': 'kiro-analytics-workgroup'
-                    }
-                },
-                Permissions=[{
-                    'Principal': self.config['quicksight']['user_arn'],
-                    'Actions': [
-                        'quicksight:DescribeDataSource',
-                        'quicksight:DescribeDataSourcePermissions',
-                        'quicksight:PassDataSource',
-                        'quicksight:UpdateDataSource',
-                        'quicksight:DeleteDataSource',
-                        'quicksight:UpdateDataSourcePermissions'
-                    ]
-                }]
-            )
-            print(f"✓ 数据源创建成功: {response['DataSourceId']}")
-            return response['DataSourceId']
-        except self.qs.exceptions.ResourceExistsException:
-            print("✓ 数据源已存在")
-            return 'kiro-athena-datasource'
+            desc = self.qs.describe_data_source(AwsAccountId=self.account_id, DataSourceId=ds_id)
+            status = desc['DataSource']['Status']
+            if status == 'CREATION_FAILED':
+                print(f"  ⚠ 数据源状态为 CREATION_FAILED，自动删除重建...")
+                self.qs.delete_data_source(AwsAccountId=self.account_id, DataSourceId=ds_id)
+            else:
+                print(f"✓ 数据源已存在 (状态: {status})")
+                return ds_id
+        except self.qs.exceptions.ResourceNotFoundException:
+            pass  # 不存在，继续创建
+
+        response = self.qs.create_data_source(
+            AwsAccountId=self.account_id,
+            DataSourceId=ds_id,
+            Name=self.config['quicksight']['data_source_name'],
+            Type='ATHENA',
+            DataSourceParameters={
+                'AthenaParameters': {
+                    'WorkGroup': 'kiro-analytics-workgroup'
+                }
+            },
+            Permissions=[{
+                'Principal': self.config['quicksight']['user_arn'],
+                'Actions': [
+                    'quicksight:DescribeDataSource',
+                    'quicksight:DescribeDataSourcePermissions',
+                    'quicksight:PassDataSource',
+                    'quicksight:UpdateDataSource',
+                    'quicksight:DeleteDataSource',
+                    'quicksight:UpdateDataSourcePermissions'
+                ]
+            }]
+        )
+        print(f"✓ 数据源创建成功: {response['DataSourceId']}")
+        return response['DataSourceId']
     
     def create_dataset(self, data_source_id):
         """创建行为分析数据集（JOIN user_mapping 获取用户名）"""
