@@ -326,15 +326,15 @@ aws cloudformation wait stack-delete-complete --stack-name kiro-analytics-stack 
 
 ```sql
 -- 查看最近 7 天的 Credit 消耗
-SELECT date, userid, client_type, credits_used
+SELECT date, userid, client_type, CAST(credits_used AS decimal) as credits_used
 FROM kiro_analytics.user_report
 WHERE date >= date_format(date_add('day', -7, current_date), '%Y-%m-%d')
 ORDER BY date DESC;
 
--- 查看每个用户的总代码生成量
+-- 查看每个用户的总代码生成量（OpenCSVSerde 列为 STRING，需要 CAST）
 SELECT userid, 
-       SUM(chat_aicodelines) as chat_code,
-       SUM(inline_aicodelines) as inline_code
+       SUM(CAST(chat_aicodelines AS bigint)) as chat_code,
+       SUM(CAST(inline_aicodelines AS bigint)) as inline_code
 FROM kiro_analytics.by_user_analytic
 GROUP BY userid;
 ```
