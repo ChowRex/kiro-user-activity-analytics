@@ -370,25 +370,36 @@ GROUP BY userid;
 | Lambda | 调用 + 执行时间 | $0 | 每天 1 次调用，远低于免费额度（100 万次/月） |
 | EventBridge | 定时规则 | $0 | 免费 |
 | Lake Formation | 权限管理 | $0 | 免费 |
-| QuickSight Author | 创建/编辑仪表板 | $24/用户/月 | 含 10GB SPICE 免费容量 |
-| QuickSight Reader | 只读查看仪表板 | $3/用户/月 | 可查看、筛选、下载数据 |
 | SPICE 额外容量 | 超出免费额度部分 | $0.38/GB/月 | 每个 Author 含 10GB 免费，本方案数据量远低于此 |
 
-> QuickSight 还提供 Author Pro（$40/用户/月）和 Reader Pro（$20/用户/月），包含 AI 生成式分析等高级功能。使用 Pro 用户时，账户需额外支付 $250/月基础设施费（启用 Q&A 时）。
+### QuickSight / Quick Suite 用户定价
+
+AWS 提供两种订阅方式，根据账号所在区域和需求选择：
+
+| 方案 | 角色 | 价格 | 说明 |
+|------|------|------|------|
+| **Quick Suite**（推荐） | Professional | $20/用户/月 | 包含 Quick Sight + Quick Research + Quick Flows，功能最全且比单独 Author 更便宜 |
+| Quick Suite | Enterprise | $35/用户/月 | 在 Professional 基础上增加自动化工作流等高级功能 |
+| **Quick Sight 仅 BI** | Author | $24/用户/月 | 创建/编辑仪表板，含 10GB SPICE |
+| Quick Sight 仅 BI | Author Pro | $40/用户/月 | Author + AI 生成式分析（需额外 $250/月账户基础设施费） |
+| Quick Sight 仅 BI | Reader | $3/用户/月 | 只读查看、筛选、下载 |
+| Quick Sight 仅 BI | Reader Pro | $20/用户/月 | Reader + AI 摘要和场景分析 |
+
+> Quick Suite 在 us-east-1 等区域可用。如果你的区域支持 Quick Suite，Professional $20/月比单独买 Quick Sight Author $24/月更划算。
 
 ### 典型场景月费估算
 
-| 场景 | QuickSight 用户 | 预估月费 |
-|------|----------------|---------|
-| 个人/小团队（1 管理员查看） | 1 Author | ~$24 |
-| 中型团队（1 管理员 + 5 只读） | 1 Author + 5 Reader | ~$39 |
-| 大型团队（2 管理员 + 20 只读） | 2 Author + 20 Reader | ~$108 |
+| 场景 | 用户配置 | Quick Suite 方案 | Quick Sight 仅 BI 方案 |
+|------|---------|-----------------|----------------------|
+| 个人/小团队（1 管理员） | 1 Author | $20 | $24 |
+| 中型团队（1 管理员 + 5 只读） | 1 Author + 5 Reader | $20 + $0* | $24 + $15 = $39 |
+| 大型团队（2 管理员 + 20 只读） | 2 Author + 20 Reader | $40 + $0* | $48 + $60 = $108 |
 
-> 费用主要来自 QuickSight 用户订阅。其他服务（S3、Athena、Lambda、Glue）在本方案的数据规模下费用可忽略不计。
+> \* Quick Suite Professional 用户可以查看仪表板，不需要额外的 Reader 费用。
 >
-> 如果只需要 1 个管理员查看仪表板，整体月费约 $24。
+> 费用主要来自用户订阅。其他服务（S3、Athena、Lambda、Glue）在本方案的数据规模下费用可忽略不计。
 >
-> 定价参考：[QuickSight Pricing](https://aws.amazon.com/quick/quicksight/pricing/)、[Athena Pricing](https://aws.amazon.com/athena/pricing/)
+> 定价参考：[Quick Suite Pricing](https://aws.amazon.com/quick/pricing/)、[QuickSight BI-only Pricing](https://aws.amazon.com/quick/quicksight/pricing/)、[Athena Pricing](https://aws.amazon.com/athena/pricing/)
 
 ## License
 
