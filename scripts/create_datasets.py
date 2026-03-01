@@ -13,49 +13,38 @@ class QuickSightDeployer:
         self.account_id = self.config['aws']['account_id']
         
     def create_data_source(self):
-        """创建 Athena 数据源（自动处理 CREATION_FAILED 状态）"""
-        ds_id = 'kiro-athena-datasource'
-
-        # 检查是否已存在，如果状态异常则删除重建
+        """创建 Athena 数据源"""
         try:
-            desc = self.qs.describe_data_source(AwsAccountId=self.account_id, DataSourceId=ds_id)
-            status = desc['DataSource']['Status']
-            if status == 'CREATION_SUCCESSFUL':
-                print(f"✓ 数据源已存在 (状态: {status})")
-                return ds_id
-            else:
-                print(f"  ⚠️ 数据源状态异常: {status}，删除后重建...")
-                self.qs.delete_data_source(AwsAccountId=self.account_id, DataSourceId=ds_id)
-        except self.qs.exceptions.ResourceNotFoundException:
-            pass
-
-        response = self.qs.create_data_source(
-            AwsAccountId=self.account_id,
-            DataSourceId=ds_id,
-            Name=self.config['quicksight']['data_source_name'],
-            Type='ATHENA',
-            DataSourceParameters={
-                'AthenaParameters': {
-                    'WorkGroup': 'kiro-analytics-workgroup'
-                }
-            },
-            Permissions=[{
-                'Principal': self.config['quicksight']['user_arn'],
-                'Actions': [
-                    'quicksight:DescribeDataSource',
-                    'quicksight:DescribeDataSourcePermissions',
-                    'quicksight:PassDataSource',
-                    'quicksight:UpdateDataSource',
-                    'quicksight:DeleteDataSource',
-                    'quicksight:UpdateDataSourcePermissions'
-                ]
-            }]
-        )
-        print(f"✓ 数据源创建成功: {response['DataSourceId']}")
-        return ds_id
+            response = self.qs.create_data_source(
+                AwsAccountId=self.account_id,
+                DataSourceId='kiro-athena-datasource',
+                Name=self.config['quicksight']['data_source_name'],
+                Type='ATHENA',
+                DataSourceParameters={
+                    'AthenaParameters': {
+                        'WorkGroup': 'kiro-analytics-workgroup'
+                    }
+                },
+                Permissions=[{
+                    'Principal': self.config['quicksight']['user_arn'],
+                    'Actions': [
+                        'quicksight:DescribeDataSource',
+                        'quicksight:DescribeDataSourcePermissions',
+                        'quicksight:PassDataSource',
+                        'quicksight:UpdateDataSource',
+                        'quicksight:DeleteDataSource',
+                        'quicksight:UpdateDataSourcePermissions'
+                    ]
+                }]
+            )
+            print(f"✓ 数据源创建成功: {response['DataSourceId']}")
+            return response['DataSourceId']
+        except self.qs.exceptions.ResourceExistsException:
+            print("✓ 数据源已存在")
+            return 'kiro-athena-datasource'
     
     def create_dataset(self, data_source_id):
-        """创建行为分析数据集（JOIN user_mapping 获取用户名）"""
+        """创建行为分析数据集（JOIN user_mapping 获取用户名，SPICE 模式）"""
         ds_arn = f"arn:aws:quicksight:{self.config['aws']['region']}:{self.account_id}:datasource/{data_source_id}"
         db = self.config['glue']['database_name']
         physical = {
@@ -150,7 +139,7 @@ class QuickSightDeployer:
             Name=self.config['quicksight']['dataset_name'],
             PhysicalTableMap=physical,
             LogicalTableMap=logical,
-            ImportMode='DIRECT_QUERY',
+            ImportMode='SPICE',
             Permissions=[{
                 'Principal': self.config['quicksight']['user_arn'],
                 'Actions': [
@@ -164,15 +153,20 @@ class QuickSightDeployer:
         )
         try:
             self.qs.create_data_set(**params)
-            print(f"✓ 行为分析数据集创建成功 (含用户名)")
+            print(f"✓ 行为分析数据集创建成功 (SPICE 模式)")
         except self.qs.exceptions.ResourceExistsException:
             del params['Permissions']
             self.qs.update_data_set(**params)
-            print(f"✓ 行为分析数据集已更新 (含用户名)")
+            print(f"✓ 行为分析数据集已更新 (SPICE 模式)")
+        
+        # 触发首次 SPICE 导入
+        self._trigger_ingestion('kiro-user-activity-dataset')
+        # 设置每日刷新计划
+        self._create_refresh_schedule('kiro-user-activity-dataset', 'activity-daily-refresh')
         return 'kiro-user-activity-dataset'
 
     def create_credits_dataset(self, data_source_id):
-        """创建 Credits 数据集（JOIN user_mapping 获取用户名）"""
+        """创建 Credits 数据集（JOIN user_mapping 获取用户名，SPICE 模式）"""
         ds_arn = f"arn:aws:quicksight:{self.config['aws']['region']}:{self.account_id}:datasource/{data_source_id}"
         db = self.config['glue']['database_name']
         physical = {
@@ -250,7 +244,7 @@ class QuickSightDeployer:
             Name='KiroUserCreditsDataset',
             PhysicalTableMap=physical,
             LogicalTableMap=logical,
-            ImportMode='DIRECT_QUERY',
+            ImportMode='SPICE',
             Permissions=[{
                 'Principal': self.config['quicksight']['user_arn'],
                 'Actions': [
@@ -264,15 +258,63 @@ class QuickSightDeployer:
         )
         try:
             self.qs.create_data_set(**params)
-            print(f"✓ Credits 数据集创建成功 (含用户名)")
+            print(f"✓ Credits 数据集创建成功 (SPICE 模式)")
         except self.qs.exceptions.ResourceExistsException:
             del params['Permissions']
             self.qs.update_data_set(**params)
-            print(f"✓ Credits 数据集已更新 (含用户名)")
+            print(f"✓ Credits 数据集已更新 (SPICE 模式)")
+        
+        # 触发首次 SPICE 导入
+        self._trigger_ingestion('kiro-user-credits-dataset')
+        # 设置每日刷新计划
+        self._create_refresh_schedule('kiro-user-credits-dataset', 'credits-daily-refresh')
         return 'kiro-user-credits-dataset'
-    
-    
-    
+
+    def _trigger_ingestion(self, dataset_id):
+        """触发 SPICE 数据导入"""
+        import time
+        ingestion_id = f"initial-{int(time.time())}"
+        try:
+            self.qs.create_ingestion(
+                AwsAccountId=self.account_id,
+                DataSetId=dataset_id,
+                IngestionId=ingestion_id
+            )
+            print(f"  ✓ SPICE 导入已触发: {dataset_id}")
+        except Exception as e:
+            print(f"  ⚠ SPICE 导入触发跳过: {e}")
+
+    def _create_refresh_schedule(self, dataset_id, schedule_id):
+        """创建每日 SPICE 刷新计划（UTC 4:00，在 user_mapping 同步之后）"""
+        schedule = {
+            'ScheduleId': schedule_id,
+            'ScheduleFrequency': {
+                'Interval': 'DAILY',
+                'TimeOfTheDay': '04:00',
+            },
+            'RefreshType': 'FULL_REFRESH',
+        }
+        try:
+            self.qs.create_refresh_schedule(
+                AwsAccountId=self.account_id,
+                DataSetId=dataset_id,
+                Schedule=schedule
+            )
+            print(f"  ✓ 每日刷新计划已创建: {schedule_id} (UTC 04:00)")
+        except Exception as e:
+            if 'already exists' in str(e).lower() or 'ResourceExists' in str(e):
+                try:
+                    self.qs.update_refresh_schedule(
+                        AwsAccountId=self.account_id,
+                        DataSetId=dataset_id,
+                        Schedule=schedule
+                    )
+                    print(f"  ✓ 每日刷新计划已更新: {schedule_id} (UTC 04:00)")
+                except Exception as e2:
+                    print(f"  ⚠ 刷新计划更新跳过: {e2}")
+            else:
+                print(f"  ⚠ 刷新计划创建跳过: {e}")
+
     def deploy_all(self):
         """部署所有资源"""
         print("开始部署 QuickSight 资源...\n")
@@ -280,11 +322,11 @@ class QuickSightDeployer:
         # 1. 创建数据源
         data_source_id = self.create_data_source()
 
-        # 2. 创建数据集
+        # 2. 创建数据集 (SPICE 模式)
         dataset_id = self.create_dataset(data_source_id)
         credits_dataset_id = self.create_credits_dataset(data_source_id)
 
-        print("\n✓ 数据源和数据集部署完成！")
+        print("\n✓ 数据源和数据集部署完成 (SPICE 模式，每日自动刷新)")
         print(f"\n访问 QuickSight 控制台查看: https://{self.config['aws']['region']}.quicksight.aws.amazon.com/")
 
 if __name__ == '__main__':

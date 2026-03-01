@@ -6,7 +6,7 @@ FROM_STEP=1
 while [[ $# -gt 0 ]]; do
     case $1 in
         --from-step) FROM_STEP=$2; shift 2;;
-        *) echo "用法: $0 [--from-step N]  (N=1~8)"; exit 1;;
+        *) echo "用法: $0 [--from-step N]  (N=1~6)"; exit 1;;
     esac
 done
 
@@ -84,7 +84,7 @@ fi # step 1
 # 2. 配置 Lake Formation 权限
 # ============================================
 
-# Lake Formation 授权辅助函数（全局定义，供多个步骤使用）
+# Lake Formation 授权辅助函数
 grant_lf() {
     local PRINCIPAL=$1
     local RESOURCE=$2
@@ -97,7 +97,6 @@ grant_lf() {
         --region $REGION 2>/dev/null && echo "  ✓ $DESC" || echo "  ✓ $DESC (已存在)"
 }
 
-# 逐表授权（兼容不支持 TableWildcard 的环境）
 grant_lf_all_tables() {
     local PRINCIPAL=$1
     local PERMS=$2
@@ -113,37 +112,25 @@ grant_lf_all_tables() {
 if [ "$FROM_STEP" -le 2 ]; then
 echo "2️⃣  配置 Lake Formation 权限..."
 
-CRAWLER_ROLE_NAME=$(aws cloudformation describe-stack-resource \
-    --stack-name $STACK_NAME \
-    --logical-resource-id GlueCrawlerRole \
-    --region $REGION \
-    --query 'StackResourceDetail.PhysicalResourceId' --output text)
-CRAWLER_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${CRAWLER_ROLE_NAME}"
 CALLER_ARN=$(aws sts get-caller-identity --query 'Arn' --output text)
 
-# Crawler: 建表权限
-grant_lf "$CRAWLER_ROLE_ARN" \
-    "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
-    "CREATE_TABLE ALTER DROP" \
-    "Crawler 数据库权限"
-
-grant_lf_all_tables "$CRAWLER_ROLE_ARN" "ALL" "Crawler 表权限"
-
 # 当前用户: Athena 查询权限
-grant_lf_all_tables "$CALLER_ARN" "SELECT DESCRIBE" "当前用户查询权限"
+grant_lf "$CALLER_ARN" \
+    "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
+    "CREATE_TABLE ALTER DESCRIBE" \
+    "当前用户数据库权限"
+grant_lf_all_tables "$CALLER_ARN" "SELECT DESCRIBE ALTER" "当前用户查询权限"
 
 # QuickSight: 读取权限
 grant_lf "$QS_ROLE_ARN" \
     "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
     "DESCRIBE" \
     "QuickSight 数据库权限"
-
 grant_lf_all_tables "$QS_ROLE_ARN" "SELECT DESCRIBE" "QuickSight 表权限"
 
-# QuickSight 用户 IAM 角色: 从 user_arn 中提取角色名并授权
+# QuickSight 用户 IAM 角色
 QS_IAM_ROLE=$(python3 -c "
 arn = '$QS_USER_ARN'
-# arn:aws:quicksight:region:account:user/default/role_name/username
 parts = arn.split('/')
 if len(parts) >= 3:
     print('arn:aws:iam::$ACCOUNT_ID:role/' + parts[-2])
@@ -155,19 +142,17 @@ if [ -n "$QS_IAM_ROLE" ]; then
         "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
         "DESCRIBE" \
         "QuickSight 用户角色数据库权限"
-
     grant_lf_all_tables "$QS_IAM_ROLE" "SELECT DESCRIBE" "QuickSight 用户角色表权限"
 fi
 
-# IAMAllowedPrincipals: 回退到 IAM 模式，确保所有有 IAM 权限的角色都能访问
+# IAMAllowedPrincipals: 回退到 IAM 模式
 grant_lf "IAM_ALLOWED_PRINCIPALS" \
     "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
     "ALL" \
     "IAMAllowedPrincipals 数据库权限"
-
 grant_lf_all_tables "IAM_ALLOWED_PRINCIPALS" "ALL" "IAMAllowedPrincipals 表权限"
 
-# Lambda 用户映射同步: 查询和建表权限
+# Lambda 用户映射同步权限
 LAMBDA_ROLE_FULL_ARN=$(aws lambda get-function-configuration \
     --function-name kiro-user-mapping-sync \
     --query 'Role' --output text --region $REGION 2>/dev/null || echo "")
@@ -184,52 +169,113 @@ echo ""
 fi # step 2
 
 # ============================================
-# 3. 运行 Glue Crawlers
+# 3. 通过 Athena DDL 创建外部表（替代 Glue Crawler）
 # ============================================
 if [ "$FROM_STEP" -le 3 ]; then
-echo "3️⃣  运行 Glue Crawlers..."
+echo "3️⃣  通过 Athena DDL 创建外部表..."
 
-CRAWLER_ANALYTIC=$(aws cloudformation describe-stacks \
-    --stack-name $STACK_NAME \
-    --query 'Stacks[0].Outputs[?OutputKey==`GlueCrawlerAnalyticName`].OutputValue' \
-    --output text --region $REGION)
+python3 -c "
+import boto3, time, sys, yaml
 
-CRAWLER_USER_REPORT=$(aws cloudformation describe-stacks \
-    --stack-name $STACK_NAME \
-    --query 'Stacks[0].Outputs[?OutputKey==`GlueCrawlerUserReportName`].OutputValue' \
-    --output text --region $REGION)
+config = yaml.safe_load(open('config.yaml'))
+region = config['aws']['region']
+account_id = config['aws']['account_id']
+bucket = config['s3']['bucket_name']
+prefix = config['s3']['prefix']
+glue_db = config['glue']['database_name']
 
-aws glue start-crawler --name $CRAWLER_ANALYTIC --region $REGION 2>/dev/null || true
-aws glue start-crawler --name $CRAWLER_USER_REPORT --region $REGION 2>/dev/null || true
+athena = boto3.client('athena', region_name=region)
+glue = boto3.client('glue', region_name=region)
 
-echo "  等待 Crawlers 完成..."
-for CRAWLER in $CRAWLER_ANALYTIC $CRAWLER_USER_REPORT; do
-    while true; do
-        STATE=$(aws glue get-crawler --name $CRAWLER --region $REGION \
-            --query 'Crawler.State' --output text)
-        if [ "$STATE" = "READY" ]; then
-            STATUS=$(aws glue get-crawler --name $CRAWLER --region $REGION \
-                --query 'Crawler.LastCrawl.Status' --output text)
-            if [ "$STATUS" = "SUCCEEDED" ]; then
-                echo "  ✓ $CRAWLER 完成"
-            else
-                echo "  ✗ $CRAWLER 失败:"
-                aws glue get-crawler --name $CRAWLER --region $REGION \
-                    --query 'Crawler.LastCrawl.ErrorMessage' --output text
-                exit 1
-            fi
-            break
-        fi
-        sleep 10
-    done
-done
+WORKGROUP = 'kiro-analytics-workgroup'
 
-echo "✓ Crawlers 全部完成"
+def run_ddl(sql, desc):
+    r = athena.start_query_execution(QueryString=sql, WorkGroup=WORKGROUP)
+    qid = r['QueryExecutionId']
+    while True:
+        s = athena.get_query_execution(QueryExecutionId=qid)['QueryExecution']['Status']['State']
+        if s == 'SUCCEEDED':
+            print(f'  ✓ {desc}')
+            return True
+        elif s == 'FAILED':
+            reason = athena.get_query_execution(QueryExecutionId=qid)['QueryExecution']['Status'].get('StateChangeReason','')
+            print(f'  ✗ {desc}: {reason}')
+            return False
+        time.sleep(2)
+
+# by_user_analytic 表
+run_ddl(f'''
+CREATE EXTERNAL TABLE IF NOT EXISTS {glue_db}.by_user_analytic (
+    date STRING,
+    userid STRING,
+    chat_aicodelines BIGINT,
+    chat_messagesinteracted BIGINT,
+    chat_messagessent BIGINT,
+    inline_aicodelines BIGINT,
+    inline_acceptancecount BIGINT,
+    inline_suggestionscount BIGINT,
+    codefix_generationeventcount BIGINT,
+    codefix_acceptanceeventcount BIGINT,
+    codefix_generatedlines BIGINT,
+    codefix_acceptedlines BIGINT,
+    codereview_findingscount BIGINT,
+    codereview_succeededeventcount BIGINT,
+    codereview_failedeventcount BIGINT,
+    dev_generationeventcount BIGINT,
+    dev_acceptanceeventcount BIGINT,
+    dev_generatedlines BIGINT,
+    dev_acceptedlines BIGINT,
+    testgeneration_eventcount BIGINT,
+    testgeneration_acceptedtests BIGINT,
+    testgeneration_generatedtests BIGINT,
+    testgeneration_generatedlines BIGINT,
+    testgeneration_acceptedlines BIGINT,
+    inlinechat_totaleventcount BIGINT,
+    inlinechat_acceptanceeventcount BIGINT,
+    inlinechat_acceptedlineadditions BIGINT,
+    inlinechat_acceptedlinedeletions BIGINT,
+    docgeneration_eventcount BIGINT,
+    docgeneration_acceptedfilescreations BIGINT,
+    docgeneration_acceptedlineadditions BIGINT,
+    transformation_eventcount BIGINT,
+    transformation_linesgenerated BIGINT
+)
+ROW FORMAT SERDE \"org.apache.hadoop.hive.serde2.OpenCSVSerde\"
+WITH SERDEPROPERTIES (\"separatorChar\" = \",\", \"quoteChar\" = \"\\\"\", \"escapeChar\" = \"\\\\\")
+STORED AS TEXTFILE
+LOCATION \"s3://{bucket}/{prefix}AWSLogs/{account_id}/KiroLogs/by_user_analytic/\"
+TBLPROPERTIES (\"skip.header.line.count\" = \"1\")
+''', 'by_user_analytic 表')
+
+# user_report 表
+run_ddl(f'''
+CREATE EXTERNAL TABLE IF NOT EXISTS {glue_db}.user_report (
+    date STRING,
+    userid STRING,
+    client_type STRING,
+    subscription_tier STRING,
+    profileid STRING,
+    total_messages BIGINT,
+    chat_conversations BIGINT,
+    credits_used DOUBLE,
+    overage_enabled STRING,
+    overage_cap DOUBLE,
+    overage_credits_used DOUBLE
+)
+ROW FORMAT SERDE \"org.apache.hadoop.hive.serde2.OpenCSVSerde\"
+WITH SERDEPROPERTIES (\"separatorChar\" = \",\", \"quoteChar\" = \"\\\"\", \"escapeChar\" = \"\\\\\")
+STORED AS TEXTFILE
+LOCATION \"s3://{bucket}/{prefix}AWSLogs/{account_id}/KiroLogs/user_report/\"
+TBLPROPERTIES (\"skip.header.line.count\" = \"1\")
+''', 'user_report 表')
+"
+
+echo "✓ 外部表创建完成"
 echo ""
 fi # step 3
 
 # ============================================
-# 4. 验证 Athena 数据查询（含重试，等待表可用）
+# 4. 验证 Athena 数据查询
 # ============================================
 if [ "$FROM_STEP" -le 4 ]; then
 echo "4️⃣  验证 Athena 数据查询..."
@@ -237,30 +283,10 @@ echo "4️⃣  验证 Athena 数据查询..."
 python3 -c "
 import boto3, time, sys
 athena = boto3.client('athena', region_name='$REGION')
-glue = boto3.client('glue', region_name='$REGION')
 tables = ['by_user_analytic', 'user_report']
-max_retries = 6
 ok = True
 
 for t in tables:
-    # 先等 Glue 表存在
-    for attempt in range(max_retries):
-        try:
-            glue.get_table(DatabaseName='$GLUE_DB', Name=t)
-            break
-        except glue.exceptions.EntityNotFoundException:
-            if attempt < max_retries - 1:
-                print(f'  ⏳ 等待表 {t} 创建... ({attempt+1}/{max_retries})')
-                time.sleep(10)
-            else:
-                print(f'  ✗ {t}: 表不存在，Crawler 可能未正确创建')
-                ok = False
-                continue
-
-    if not ok:
-        continue
-
-    # 查询验证
     r = athena.start_query_execution(
         QueryString=f'SELECT COUNT(*) FROM $GLUE_DB.{t}',
         WorkGroup='$WORKGROUP')
@@ -286,19 +312,10 @@ echo ""
 fi # step 4
 
 # ============================================
-# 5. 创建 Athena 视图
+# 5. 同步用户映射 (Identity Center → S3 → Athena)
 # ============================================
 if [ "$FROM_STEP" -le 5 ]; then
-echo "5️⃣  创建 Athena 视图..."
-python3 scripts/create_views.py
-echo ""
-fi # step 5
-
-# ============================================
-# 6. 同步用户映射 (Identity Center → S3 → Athena)
-# ============================================
-if [ "$FROM_STEP" -le 6 ]; then
-echo "6️⃣  同步用户名映射..."
+echo "5️⃣  同步用户名映射..."
 python3 scripts/sync_user_mapping.py
 
 # user_mapping 表是新建的，需要补授 Lake Formation 权限
@@ -308,25 +325,20 @@ grant_lf "IAM_ALLOWED_PRINCIPALS" \
     "ALL" \
     "IAMAllowedPrincipals user_mapping 权限"
 echo ""
-fi # step 6
+fi # step 5
 
 # ============================================
-# 7. 部署 QuickSight 数据源和数据集
+# 6. 部署 QuickSight 数据源、数据集和 Dashboard
 # ============================================
-if [ "$FROM_STEP" -le 7 ]; then
-echo "7️⃣  部署 QuickSight 数据源和数据集..."
+if [ "$FROM_STEP" -le 6 ]; then
+echo "6️⃣  部署 QuickSight 数据源和数据集 (SPICE 模式)..."
 python3 scripts/create_datasets.py
 echo ""
-fi # step 7
 
-# ============================================
-# 8. 发布 QuickSight Dashboard
-# ============================================
-if [ "$FROM_STEP" -le 8 ]; then
-echo "8️⃣  发布 QuickSight Dashboard..."
+echo "7️⃣  发布 QuickSight Dashboard..."
 python3 scripts/create_dashboard_publish.py
 echo ""
-fi # step 8
+fi # step 6
 
 # ============================================
 # 完成

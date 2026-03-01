@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Kiro User Activity Analytics Infrastructure'
+Description: 'Kiro User Activity Analytics Infrastructure (Simplified)'
 
 Parameters:
   S3BucketName:
@@ -27,42 +27,7 @@ Resources:
         Name: !Ref GlueDatabaseName
         Description: 'Kiro user activity analytics database'
 
-  # Glue Crawler - 详细行为数据 (by_user_analytic)
-  GlueCrawlerAnalytic:
-    Type: AWS::Glue::Crawler
-    Properties:
-      Name: kiro-analytic-crawler
-      Role: !GetAtt GlueCrawlerRole.Arn
-      DatabaseName: !Ref GlueDatabase
-      TablePrefix: ''
-      Targets:
-        S3Targets:
-          - Path: !Sub 's3://${S3BucketName}/${S3Prefix}AWSLogs/${AWS::AccountId}/KiroLogs/by_user_analytic/'
-      SchemaChangePolicy:
-        UpdateBehavior: UPDATE_IN_DATABASE
-        DeleteBehavior: LOG
-      Schedule:
-        ScheduleExpression: 'cron(0 2 * * ? *)'
-      Configuration: '{"Version":1.0,"Grouping":{"TableGroupingPolicy":"CombineCompatibleSchemas"}}'
-
-  # Glue Crawler - 用户汇总数据 (user_report)
-  GlueCrawlerUserReport:
-    Type: AWS::Glue::Crawler
-    Properties:
-      Name: kiro-user-report-crawler
-      Role: !GetAtt GlueCrawlerRole.Arn
-      DatabaseName: !Ref GlueDatabase
-      TablePrefix: ''
-      Targets:
-        S3Targets:
-          - Path: !Sub 's3://${S3BucketName}/${S3Prefix}AWSLogs/${AWS::AccountId}/KiroLogs/user_report/'
-      SchemaChangePolicy:
-        UpdateBehavior: UPDATE_IN_DATABASE
-        DeleteBehavior: LOG
-      Schedule:
-        ScheduleExpression: 'cron(0 2 * * ? *)'
-
-  # IAM Role for Glue Crawlers
+  # IAM Role for Glue table management (used by deploy script DDL)
   GlueCrawlerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -254,7 +219,7 @@ Resources:
               print(f'Sync complete: {len(mapping)} users')
               return {'users': len(mapping)}
 
-  # EventBridge 定时触发 - 每天 UTC 3:00 (爬虫 2:00 后)
+  # EventBridge 定时触发 - 每天 UTC 3:00
   UserMappingScheduleRule:
     Type: AWS::Events::Rule
     Properties:
@@ -279,16 +244,6 @@ Outputs:
     Value: !Ref GlueDatabase
     Export:
       Name: KiroAnalyticsDatabase
-
-  GlueCrawlerAnalyticName:
-    Value: !Ref GlueCrawlerAnalytic
-    Export:
-      Name: KiroAnalyticCrawler
-
-  GlueCrawlerUserReportName:
-    Value: !Ref GlueCrawlerUserReport
-    Export:
-      Name: KiroUserReportCrawler
 
   AthenaWorkgroupName:
     Value: !Ref AthenaWorkgroup

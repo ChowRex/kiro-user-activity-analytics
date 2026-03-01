@@ -139,7 +139,7 @@ class QuickSightDeployer:
             Name=self.config['quicksight']['dataset_name'],
             PhysicalTableMap=physical,
             LogicalTableMap=logical,
-            ImportMode='DIRECT_QUERY',
+            ImportMode='SPICE',
             Permissions=[{
                 'Principal': self.config['quicksight']['user_arn'],
                 'Actions': [
@@ -153,11 +153,11 @@ class QuickSightDeployer:
         )
         try:
             self.qs.create_data_set(**params)
-            print(f"✓ 行为分析数据集创建成功 (含用户名)")
+            print(f"✓ 行为分析数据集创建成功 (SPICE 模式)")
         except self.qs.exceptions.ResourceExistsException:
             del params['Permissions']
             self.qs.update_data_set(**params)
-            print(f"✓ 行为分析数据集已更新 (含用户名)")
+            print(f"✓ 行为分析数据集已更新 (SPICE 模式)")
         return 'kiro-user-activity-dataset'
 
     def create_credits_dataset(self, data_source_id):
@@ -239,7 +239,7 @@ class QuickSightDeployer:
             Name='KiroUserCreditsDataset',
             PhysicalTableMap=physical,
             LogicalTableMap=logical,
-            ImportMode='DIRECT_QUERY',
+            ImportMode='SPICE',
             Permissions=[{
                 'Principal': self.config['quicksight']['user_arn'],
                 'Actions': [
@@ -253,11 +253,11 @@ class QuickSightDeployer:
         )
         try:
             self.qs.create_data_set(**params)
-            print(f"✓ Credits 数据集创建成功 (含用户名)")
+            print(f"✓ Credits 数据集创建成功 (SPICE 模式)")
         except self.qs.exceptions.ResourceExistsException:
             del params['Permissions']
             self.qs.update_data_set(**params)
-            print(f"✓ Credits 数据集已更新 (含用户名)")
+            print(f"✓ Credits 数据集已更新 (SPICE 模式)")
         return 'kiro-user-credits-dataset'
     
     
