@@ -370,22 +370,25 @@ GROUP BY userid;
 | Lambda | 调用 + 执行时间 | $0 | 每天 1 次调用，远低于免费额度（100 万次/月） |
 | EventBridge | 定时规则 | $0 | 免费 |
 | Lake Formation | 权限管理 | $0 | 免费 |
-| QuickSight | 用户订阅 | $18~$24/作者/月 | Enterprise 版按作者用户计费；只读读者 $0.30/会话（最高 $5/月） |
-| SPICE | 数据存储 | $0 | 每个作者用户含 10GB 免费 SPICE 容量，本方案数据量远低于此 |
+| QuickSight Author | 创建/编辑仪表板 | $24/用户/月 | 含 10GB SPICE 免费容量 |
+| QuickSight Reader | 只读查看仪表板 | $3/用户/月 | 可查看、筛选、下载数据 |
+| SPICE 额外容量 | 超出免费额度部分 | $0.38/GB/月 | 每个 Author 含 10GB 免费，本方案数据量远低于此 |
+
+> QuickSight 还提供 Author Pro（$40/用户/月）和 Reader Pro（$20/用户/月），包含 AI 生成式分析等高级功能。使用 Pro 用户时，账户需额外支付 $250/月基础设施费（启用 Q&A 时）。
 
 ### 典型场景月费估算
 
 | 场景 | QuickSight 用户 | 预估月费 |
 |------|----------------|---------|
-| 个人/小团队（1 管理员查看） | 1 作者 | ~$18 |
-| 中型团队（1 管理员 + 5 只读） | 1 作者 + 5 读者 | ~$19~$25 |
-| 大型团队（2 管理员 + 20 只读） | 2 作者 + 20 读者 | ~$42~$136 |
+| 个人/小团队（1 管理员查看） | 1 Author | ~$24 |
+| 中型团队（1 管理员 + 5 只读） | 1 Author + 5 Reader | ~$39 |
+| 大型团队（2 管理员 + 20 只读） | 2 Author + 20 Reader | ~$108 |
 
 > 费用主要来自 QuickSight 用户订阅。其他服务（S3、Athena、Lambda、Glue）在本方案的数据规模下费用可忽略不计。
 >
-> 如果只需要 1 个管理员查看仪表板，整体月费约 $18。
+> 如果只需要 1 个管理员查看仪表板，整体月费约 $24。
 >
-> 定价参考：[QuickSight Pricing](https://aws.amazon.com/quicksight/pricing/)、[Athena Pricing](https://aws.amazon.com/athena/pricing/)
+> 定价参考：[QuickSight Pricing](https://aws.amazon.com/quick/quicksight/pricing/)、[Athena Pricing](https://aws.amazon.com/athena/pricing/)
 
 ## License
 
