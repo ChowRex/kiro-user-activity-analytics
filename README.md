@@ -343,15 +343,18 @@ GROUP BY userid;
 
 | 问题 | 解决方案 |
 |------|---------|
-| Athena 查询报 `AccessDeniedException` | 检查 Lake Formation 权限，重新运行 `deploy.sh` 的第 2 步 |
-| Athena DDL 建表失败 | 确认 S3 路径正确，检查 S3 桶策略是否允许访问 |
-| QuickSight 报 `SQL exception` | 确认 QuickSight 已授权访问 S3 bucket（Manage QuickSight → Security & permissions → S3），并确认当前用户是 Lake Formation Data Lake Admin |
-| QuickSight 数据源 `CREATION_FAILED` | 通常是 S3 权限问题，在 QuickSight Console 授权 S3 后删除数据源重建：`sh deploy.sh --from-step 6` |
-| SPICE 刷新失败 | 检查 Athena 表是否可查询，确认 QuickSight Service Role 有 Lake Formation 权限 |
-| 用户名显示为 UUID | 运行 `python3 scripts/sync_user_mapping.py` 手动同步映射 |
-| 仪表板图表为空 | 检查 Athena 表是否有数据：`SELECT COUNT(*) FROM kiro_analytics.user_report` |
+| Athena 查询报 `AccessDeniedException` | 检查 Lake Formation 权限，重新运行 `sh deploy.sh --from-step 3`（建表后会自动重新授权） |
+| Athena 查询 `SUM()` 报 `FUNCTION_NOT_FOUND` | OpenCSVSerde 所有列为 STRING，手动查询需要 CAST：`SUM(CAST(col AS bigint))`。QuickSight 数据集已通过 CastColumnTypeOperation 自动转换，不受影响 |
+| Glue API 建表失败 | 确认 S3 路径正确，检查 S3 桶策略是否允许访问 |
+| QuickSight 报 `SQL exception` / `TABLE_NOT_FOUND` | 1. 确认 Athena 表存在：`aws glue get-table --database-name kiro_analytics --name by_user_analytic`<br>2. 确认 QuickSight 已授权 S3（Manage QuickSight → Security & permissions → S3）<br>3. 确认当前用户是 Lake Formation Data Lake Admin<br>4. 重跑 `sh deploy.sh --from-step 3` |
+| QuickSight 数据源 `CREATION_FAILED` | S3 权限问题。先在 QuickSight Console → Manage QuickSight → Security & permissions → S3 中授权 bucket，然后重跑 `sh deploy.sh --from-step 6`（脚本会自动删除失败的数据源并重建） |
+| SPICE 刷新失败 | 检查 Athena 表是否可查询，确认 Lake Formation 表权限已授予 QuickSight Service Role。如果是删表重建导致权限丢失，重跑 `sh deploy.sh --from-step 3` |
+| Dashboard 数值显示为 0 或无数据 | 可能是 Glue 表列顺序与 CSV header 不匹配。用 `SELECT * FROM kiro_analytics.user_report LIMIT 1` 验证列值是否合理，如不对需要修正表定义并重跑 `sh deploy.sh --from-step 3` |
+| 用户名显示为 UUID | 运行 `python3 scripts/sync_user_mapping.py` 手动同步映射。如果 Identity Center 重建过用户目录，历史 userid 将无法解析 |
+| 仪表板图表为空 | 1. 检查 Athena 表有数据：`SELECT COUNT(*) FROM kiro_analytics.user_report`<br>2. 检查 SPICE 导入状态：QuickSight Console → Datasets → 查看最近导入<br>3. 手动触发 SPICE 刷新 |
 | S3 没有新数据 | 报告有 1-2 天延迟，确认 Kiro User Activity Report 已开启 |
 | CloudFormation 部署报 `ROLLBACK_COMPLETE` | deploy.sh 会自动处理，删除旧 stack 后重建 |
+| Lake Formation 权限丢失（删表重建后） | deploy.sh 步骤 3 建表后会自动重新授权所有 principal 的表级别权限，无需手动处理 |
 
 ## License
 
