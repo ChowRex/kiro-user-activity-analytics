@@ -356,6 +356,37 @@ GROUP BY userid;
 | CloudFormation 部署报 `ROLLBACK_COMPLETE` | deploy.sh 会自动处理，删除旧 stack 后重建 |
 | Lake Formation 权限丢失（删表重建后） | deploy.sh 步骤 3 建表后会自动重新授权所有 principal 的表级别权限，无需手动处理 |
 
+## 成本估算
+
+本方案使用的 AWS 服务均为按量付费或有免费额度，适合中小团队低成本运行。
+
+### 各服务费用（us-east-1 区域）
+
+| 服务 | 计费项 | 预估费用（50 用户/月） | 说明 |
+|------|--------|----------------------|------|
+| S3 | 存储 + 请求 | < $0.10 | Kiro 报告 CSV 文件很小，每用户每天 ~1KB |
+| Glue Data Catalog | 表存储 | $0 | 前 100 万个对象免费 |
+| Athena | 查询扫描量 | < $0.50 | 按扫描数据量计费（$5/TB），CSV 数据量极小；SPICE 模式下日常仅刷新时查询 |
+| Lambda | 调用 + 执行时间 | $0 | 每天 1 次调用，远低于免费额度（100 万次/月） |
+| EventBridge | 定时规则 | $0 | 免费 |
+| Lake Formation | 权限管理 | $0 | 免费 |
+| QuickSight | 用户订阅 | $18~$24/作者/月 | Enterprise 版按作者用户计费；只读读者 $0.30/会话（最高 $5/月） |
+| SPICE | 数据存储 | $0 | 每个作者用户含 10GB 免费 SPICE 容量，本方案数据量远低于此 |
+
+### 典型场景月费估算
+
+| 场景 | QuickSight 用户 | 预估月费 |
+|------|----------------|---------|
+| 个人/小团队（1 管理员查看） | 1 作者 | ~$18 |
+| 中型团队（1 管理员 + 5 只读） | 1 作者 + 5 读者 | ~$19~$25 |
+| 大型团队（2 管理员 + 20 只读） | 2 作者 + 20 读者 | ~$42~$136 |
+
+> 费用主要来自 QuickSight 用户订阅。其他服务（S3、Athena、Lambda、Glue）在本方案的数据规模下费用可忽略不计。
+>
+> 如果只需要 1 个管理员查看仪表板，整体月费约 $18。
+>
+> 定价参考：[QuickSight Pricing](https://aws.amazon.com/quicksight/pricing/)、[Athena Pricing](https://aws.amazon.com/athena/pricing/)
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
