@@ -110,25 +110,23 @@ grant_lf_all_tables() {
 }
 
 if [ "$FROM_STEP" -le 2 ]; then
-echo "2️⃣  配置 Lake Formation 权限..."
+echo "2️⃣  配置 Lake Formation 数据库权限..."
 
 CALLER_ARN=$(aws sts get-caller-identity --query 'Arn' --output text)
 
-# 当前用户: Athena 查询权限
+# 当前用户: 数据库权限（建表需要）
 grant_lf "$CALLER_ARN" \
     "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
     "CREATE_TABLE ALTER DESCRIBE" \
     "当前用户数据库权限"
-grant_lf_all_tables "$CALLER_ARN" "SELECT DESCRIBE ALTER" "当前用户查询权限"
 
-# QuickSight: 读取权限
+# QuickSight: 数据库权限
 grant_lf "$QS_ROLE_ARN" \
     "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
     "DESCRIBE" \
     "QuickSight 数据库权限"
-grant_lf_all_tables "$QS_ROLE_ARN" "SELECT DESCRIBE" "QuickSight 表权限"
 
-# QuickSight 用户 IAM 角色
+# QuickSight 用户 IAM 角色: 数据库权限
 QS_IAM_ROLE=$(python3 -c "
 arn = '$QS_USER_ARN'
 parts = arn.split('/')
@@ -142,17 +140,15 @@ if [ -n "$QS_IAM_ROLE" ]; then
         "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
         "DESCRIBE" \
         "QuickSight 用户角色数据库权限"
-    grant_lf_all_tables "$QS_IAM_ROLE" "SELECT DESCRIBE" "QuickSight 用户角色表权限"
 fi
 
-# IAMAllowedPrincipals: 回退到 IAM 模式
+# IAMAllowedPrincipals: 数据库权限
 grant_lf "IAM_ALLOWED_PRINCIPALS" \
     "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
     "ALL" \
     "IAMAllowedPrincipals 数据库权限"
-grant_lf_all_tables "IAM_ALLOWED_PRINCIPALS" "ALL" "IAMAllowedPrincipals 表权限"
 
-# Lambda 用户映射同步权限
+# Lambda: 数据库权限
 LAMBDA_ROLE_FULL_ARN=$(aws lambda get-function-configuration \
     --function-name kiro-user-mapping-sync \
     --query 'Role' --output text --region $REGION 2>/dev/null || echo "")
@@ -161,10 +157,9 @@ if [ -n "$LAMBDA_ROLE_FULL_ARN" ] && [ "$LAMBDA_ROLE_FULL_ARN" != "None" ]; then
         "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
         "CREATE_TABLE ALTER DESCRIBE" \
         "Lambda 数据库权限"
-    grant_lf_all_tables "$LAMBDA_ROLE_FULL_ARN" "SELECT DESCRIBE ALTER" "Lambda 表权限"
 fi
 
-echo "✓ Lake Formation 权限配置完成"
+echo "✓ Lake Formation 数据库权限配置完成"
 echo ""
 fi # step 2
 
@@ -288,12 +283,13 @@ create_table('user_report', [
 
 echo "✓ 外部表创建完成"
 
-# 删表重建后 Lake Formation 权限会失效，需要重新授权
-echo "  重新授权 Lake Formation 权限（删表重建后必须）..."
-grant_lf_all_tables "IAM_ALLOWED_PRINCIPALS" "ALL" "IAMAllowedPrincipals 表权限"
+# 建表完成后，统一授权所有 principal 的表级别 Lake Formation 权限
+echo "  配置 Lake Formation 表级别权限..."
 
 CALLER_ARN=$(aws sts get-caller-identity --query 'Arn' --output text)
 grant_lf_all_tables "$CALLER_ARN" "SELECT DESCRIBE ALTER" "当前用户查询权限"
+
+grant_lf_all_tables "IAM_ALLOWED_PRINCIPALS" "ALL" "IAMAllowedPrincipals 表权限"
 
 grant_lf_all_tables "$QS_ROLE_ARN" "SELECT DESCRIBE" "QuickSight 表权限"
 
@@ -307,6 +303,13 @@ else:
 ")
 if [ -n "$QS_IAM_ROLE" ]; then
     grant_lf_all_tables "$QS_IAM_ROLE" "SELECT DESCRIBE" "QuickSight 用户角色表权限"
+fi
+
+LAMBDA_ROLE_FULL_ARN=$(aws lambda get-function-configuration \
+    --function-name kiro-user-mapping-sync \
+    --query 'Role' --output text --region $REGION 2>/dev/null || echo "")
+if [ -n "$LAMBDA_ROLE_FULL_ARN" ] && [ "$LAMBDA_ROLE_FULL_ARN" != "None" ]; then
+    grant_lf_all_tables "$LAMBDA_ROLE_FULL_ARN" "SELECT DESCRIBE ALTER" "Lambda 表权限"
 fi
 
 echo ""
@@ -356,12 +359,18 @@ if [ "$FROM_STEP" -le 5 ]; then
 echo "5️⃣  同步用户名映射..."
 python3 scripts/sync_user_mapping.py
 
-# user_mapping 表是新建的，需要补授 Lake Formation 权限
+# user_mapping 表可能被 sync 脚本重建，需要补授 Lake Formation 权限
 echo "  补授 user_mapping 表 Lake Formation 权限..."
-grant_lf "IAM_ALLOWED_PRINCIPALS" \
-    "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"user_mapping\"}}" \
-    "ALL" \
-    "IAMAllowedPrincipals user_mapping 权限"
+for PERM_PAIR in \
+    "IAM_ALLOWED_PRINCIPALS|ALL|IAMAllowedPrincipals" \
+    "$(aws sts get-caller-identity --query 'Arn' --output text)|SELECT DESCRIBE ALTER|当前用户" \
+    "$QS_ROLE_ARN|SELECT DESCRIBE|QuickSight"; do
+    IFS='|' read -r P PERMS DESC <<< "$PERM_PAIR"
+    grant_lf "$P" \
+        "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"user_mapping\"}}" \
+        "$PERMS" \
+        "$DESC user_mapping 权限"
+done
 echo ""
 fi # step 5
 
