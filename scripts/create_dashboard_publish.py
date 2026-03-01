@@ -178,6 +178,26 @@ definition = {
             'Visuals': [
                 line('d-line-overage', '每日超额趋势', CR, 'date',
                      [('ov_sum', 'overage_credits_used', 'SUM')]),
+                # 每日每用户 Credit 消耗趋势（按用户分色）
+                {'LineChartVisual': {
+                    'VisualId': 'd-line-user-credits',
+                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '每日每用户 Credit 消耗趋势'}},
+                    'ChartConfiguration': {'FieldWells': {'LineChartAggregatedFieldWells': {
+                        'Category': [{'CategoricalDimensionField': {
+                            'FieldId': 'uc_date',
+                            'Column': {'DataSetIdentifier': CR, 'ColumnName': 'date'}
+                        }}],
+                        'Values': [{'NumericalMeasureField': {
+                            'FieldId': 'uc_credits',
+                            'Column': {'DataSetIdentifier': CR, 'ColumnName': 'credits_used'},
+                            'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}
+                        }}],
+                        'Colors': [{'CategoricalDimensionField': {
+                            'FieldId': 'uc_user',
+                            'Column': {'DataSetIdentifier': CR, 'ColumnName': 'username'}
+                        }}]
+                    }}}
+                }},
                 bar('d-bar-tier-cost', '各层级平均 Credit 消耗', CR, 'subscription_tier',
                     [('avg_cr', 'credits_used', 'AVERAGE'),
                      ('avg_cap', 'overage_cap', 'AVERAGE')]),
