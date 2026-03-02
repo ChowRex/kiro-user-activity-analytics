@@ -38,12 +38,14 @@ WORKGROUP="kiro-analytics-workgroup"
 GLUE_DB="kiro_analytics"
 QS_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/service-role/aws-quicksight-service-role-v0"
 QS_USER_ARN=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['quicksight']['user_arn'])")
+AWS_PROFILE=${AWS_PROFILE:-default}
 
 echo "📋 配置信息:"
 echo "  Region:    $REGION"
 echo "  Account:   $ACCOUNT_ID"
 echo "  S3 Bucket: $BUCKET"
 echo "  S3 Prefix: $PREFIX"
+echo "  CLI Porfile: $AWS_PROFILE"
 echo ""
 
 # ============================================
