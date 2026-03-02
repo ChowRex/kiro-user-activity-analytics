@@ -136,6 +136,10 @@ cp config.example.yaml config.yaml
 ### 3. 一键部署
 
 ```bash
+# 如果你有多个AWS config, 需要指定具体的profile名称
+# export AWS_PROFILE="Your-profile-name"
+export AWS_PROFILE=${AWS_PROFILE:-default}
+
 chmod +x deploy.sh
 ./deploy.sh
 ```
