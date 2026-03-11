@@ -298,12 +298,41 @@ aws lambda invoke --function-name kiro-user-mapping-sync /tmp/out.json && cat /t
 
 ## 常用操作
 
+### 仅更新数据集配置（不重建基础设施）
+
+当需要修改数据集的字段、筛选器或类型转换时：
+
+```bash
+python3 scripts/create_datasets.py
+```
+
+此操作会：
+- 更新 QuickSight 数据集配置
+- 自动触发 SPICE 刷新
+- 保留现有的 Dashboard 和 Analysis
+
 ### 仅更新仪表板（不重建基础设施）
 
 ```bash
 python3 scripts/create_datasets.py
 python3 scripts/create_dashboard_publish.py
 ```
+
+### 手动同步用户名映射
+
+当有新用户加入或用户名变更时：
+
+```bash
+python3 scripts/sync_user_mapping.py
+```
+
+此脚本会：
+1. 从 Athena 查询所有不重复的 userid（自动处理新旧格式）
+2. 调用 Identity Center API 获取用户显示名
+3. 生成 CSV 并上传到 S3
+4. 更新 Glue 外部表 `user_mapping`
+
+**注意**：Lambda 函数每天 UTC 3:00 自动执行此操作。
 
 ### 手动触发 SPICE 数据刷新
 
@@ -354,11 +383,44 @@ GROUP BY userid;
 | QuickSight 数据源 `CREATION_FAILED` | S3 权限问题。先在 QuickSight Console → Manage QuickSight → Security & permissions → S3 中授权 bucket，然后重跑 `sh deploy.sh --from-step 6`（脚本会自动删除失败的数据源并重建） |
 | SPICE 刷新失败 | 检查 Athena 表是否可查询，确认 Lake Formation 表权限已授予 QuickSight Service Role。如果是删表重建导致权限丢失，重跑 `sh deploy.sh --from-step 3` |
 | Dashboard 数值显示为 0 或无数据 | 可能是 Glue 表列顺序与 CSV header 不匹配。用 `SELECT * FROM kiro_analytics.user_report LIMIT 1` 验证列值是否合理，如不对需要修正表定义并重跑 `sh deploy.sh --from-step 3` |
-| 用户名显示为 UUID | 运行 `python3 scripts/sync_user_mapping.py` 手动同步映射。如果 Identity Center 重建过用户目录，历史 userid 将无法解析 |
+| 用户名显示为 UUID 或 null | 运行 `python3 scripts/sync_user_mapping.py` 手动同步映射。如果 Identity Center 重建过用户目录，历史 userid 将无法解析 |
 | 仪表板图表为空 | 1. 检查 Athena 表有数据：`SELECT COUNT(*) FROM kiro_analytics.user_report`<br>2. 检查 SPICE 导入状态：QuickSight Console → Datasets → 查看最近导入<br>3. 手动触发 SPICE 刷新 |
+| 趋势图不显示线条 | date 字段需要是 DATETIME 类型。确认 `scripts/create_datasets.py` 中有 date 类型转换，重新运行 `python3 scripts/create_datasets.py` |
 | S3 没有新数据 | 报告有 1-2 天延迟，确认 Kiro User Activity Report 已开启 |
 | CloudFormation 部署报 `ROLLBACK_COMPLETE` | deploy.sh 会自动处理，删除旧 stack 后重建 |
 | Lake Formation 权限丢失（删表重建后） | deploy.sh 步骤 3 建表后会自动重新授权所有 principal 的表级别权限，无需手动处理 |
+
+## 数据配置说明
+
+### 数据过滤
+
+默认配置过滤掉 **2026-02-10 及之前**的数据（早期数据质量问题）。如需修改过滤日期：
+
+1. 编辑 `scripts/create_datasets.py`
+2. 搜索 `FilterOperation` 和 `parseDate("2026-02-10")`
+3. 修改日期后运行 `python3 scripts/create_datasets.py`
+
+### 数据类型转换
+
+数据集自动进行以下转换：
+- **date**: STRING → DATETIME（支持趋势图时间序列）
+- **数值列**: STRING → INTEGER/DECIMAL（支持聚合计算）
+
+### 已知限制
+
+1. **部分用户名显示为 null**: 
+   - 原因：AWS 在 2026-03-10 改变了 `user_report` 表的 userid 格式（添加了 Identity Store ID 前缀）
+   - 影响：新格式的 userid 无法与 `user_mapping` 表的纯 UUID 匹配
+   - 解决方案：Athena 查询可以正常显示所有数据，QuickSight 中受影响的用户会显示为 null
+
+2. **历史数据延迟**: 
+   - Kiro User Activity Report 有 1-2 天延迟
+   - 开启后第二天才会看到第一份报告
+
+3. **早期 PRO 层级 credit 数值异常**: 
+   - `user_report` 功能从 2026-02-10 开始提供数据
+   - 早期 PRO 层级的 credit 数值可能异常偏大
+   - 升级到 PRO_PLUS 后数据正常
 
 ## 成本估算
 

@@ -50,21 +50,32 @@ def get_display_name(user_id):
     """从 Identity Center 获取用户显示名"""
     try:
         user = ids.describe_user(IdentityStoreId=identity_store_id, UserId=user_id)
-        return user.get('DisplayName', '') or user.get('UserName', '') or user_id
+        name = user.get('DisplayName', '') or user.get('UserName', '') or user_id
+        # 清理换行符和特殊字符
+        return name.replace('\r', '').replace('\n', '').strip()
     except Exception as e:
         print(f"    ✗ DescribeUser 失败: {e}")
         return user_id
 
 
 # ============================================
-# 1. 从两张表查出所有不重复的 userid
+# 1. 从两张表查出所有不重复的 userid（提取纯 UUID）
 # ============================================
 print("1. 查询所有 userid...")
 raw_userids = set()  # 原始值（可能带引号）
 
 for table in ['by_user_analytic', 'user_report']:
     try:
-        rows = run_query(f'SELECT DISTINCT userid FROM {glue_db}.{table}')
+        # 使用 CASE 语句提取纯 UUID（去掉 d-xxxxx. 前缀）
+        query = f"""
+            SELECT DISTINCT 
+                CASE 
+                    WHEN userid LIKE 'd-%' THEN split_part(userid, '.', 2)
+                    ELSE userid
+                END as userid_clean
+            FROM {glue_db}.{table}
+        """
+        rows = run_query(query)
         for row in rows:
             if row[0]:
                 raw_userids.add(row[0])
@@ -85,15 +96,15 @@ for raw_uid in sorted(raw_userids):
         continue
     name = get_display_name(clean_uid)
     # 映射表存储原始 userid（与 Athena 表中一致）以便 JOIN
-    mapping.append((raw_uid, name))
-    print(f"  {raw_uid} → {name}")
+    mapping.append((clean_uid, name))  # 使用 clean_uid 而不是 raw_uid
+    print(f"  {clean_uid} → {name}")
 
 # ============================================
-# 3. 生成 CSV 并上传到 S3
+# 3. 生成 CSV 并上传到 S3（使用 Unix 换行符）
 # ============================================
 print("3. 上传映射文件到 S3...")
-buf = io.StringIO()
-writer = csv.writer(buf)
+buf = io.StringIO(newline='')  # 强制使用 \n
+writer = csv.writer(buf, lineterminator='\n')  # Unix 换行符
 writer.writerow(['userid', 'username'])
 for uid, name in mapping:
     writer.writerow([uid, name])
