@@ -142,7 +142,9 @@ class QuickSightDeployer:
             'testgeneration_generatedlines', 'testgeneration_generatedtests',
             'transformation_eventcount', 'transformation_linesgenerated',
         ]
-        cast_transforms = [{'CastColumnTypeOperation': {
+        cast_transforms = [
+            {'CastColumnTypeOperation': {'ColumnName': 'date', 'NewColumnType': 'DATETIME', 'Format': 'MM-dd-yyyy'}}
+        ] + [{'CastColumnTypeOperation': {
             'ColumnName': c, 'NewColumnType': 'INTEGER'
         }} for c in int_cols]
 
@@ -172,22 +174,29 @@ class QuickSightDeployer:
                         'OnClause': 'userid = map_userid'
                     }
                 },
-                'DataTransforms': [{
-                    'ProjectOperation': {
-                        'ProjectedColumns': [
-                            'date', 'userid', 'username',
-                            'chat_aicodelines', 'chat_messagesinteracted', 'chat_messagessent',
-                            'inline_aicodelines', 'inline_acceptancecount', 'inline_suggestionscount',
-                            'codefix_generationeventcount', 'codefix_acceptanceeventcount',
-                            'codereview_findingscount', 'codereview_succeededeventcount',
-                            'dev_generationeventcount', 'dev_acceptanceeventcount', 'dev_generatedlines',
-                            'testgeneration_eventcount', 'testgeneration_acceptedtests',
-                            'inlinechat_totaleventcount', 'inlinechat_acceptanceeventcount',
-                            'docgeneration_eventcount', 'docgeneration_acceptedfilescreations',
-                            'transformation_eventcount', 'transformation_linesgenerated',
-                        ]
+                'DataTransforms': [
+                    {
+                        'ProjectOperation': {
+                            'ProjectedColumns': [
+                                'date', 'userid', 'username',
+                                'chat_aicodelines', 'chat_messagesinteracted', 'chat_messagessent',
+                                'inline_aicodelines', 'inline_acceptancecount', 'inline_suggestionscount',
+                                'codefix_generationeventcount', 'codefix_acceptanceeventcount',
+                                'codereview_findingscount', 'codereview_succeededeventcount',
+                                'dev_generationeventcount', 'dev_acceptanceeventcount', 'dev_generatedlines',
+                                'testgeneration_eventcount', 'testgeneration_acceptedtests',
+                                'inlinechat_totaleventcount', 'inlinechat_acceptanceeventcount',
+                                'docgeneration_eventcount', 'docgeneration_acceptedfilescreations',
+                                'transformation_eventcount', 'transformation_linesgenerated',
+                            ]
+                        }
+                    },
+                    {
+                        'FilterOperation': {
+                            'ConditionExpression': 'date > parseDate("2026-02-10", "yyyy-MM-dd")'
+                        }
                     }
-                }]
+                ]
             }
         }
         params = dict(
@@ -258,6 +267,7 @@ class QuickSightDeployer:
             }
         }
         credits_cast = [
+            {'CastColumnTypeOperation': {'ColumnName': 'date', 'NewColumnType': 'DATETIME', 'Format': 'yyyy-MM-dd'}},
             {'CastColumnTypeOperation': {'ColumnName': 'total_messages', 'NewColumnType': 'INTEGER'}},
             {'CastColumnTypeOperation': {'ColumnName': 'chat_conversations', 'NewColumnType': 'INTEGER'}},
             {'CastColumnTypeOperation': {'ColumnName': 'credits_used', 'NewColumnType': 'DECIMAL'}},
@@ -290,17 +300,24 @@ class QuickSightDeployer:
                         'OnClause': 'userid = map_userid'
                     }
                 },
-                'DataTransforms': [{
-                    'ProjectOperation': {
-                        'ProjectedColumns': [
-                            'date', 'userid', 'username',
-                            'client_type', 'subscription_tier',
-                            'total_messages', 'chat_conversations',
-                            'credits_used', 'overage_cap',
-                            'overage_credits_used', 'overage_enabled', 'profileid',
-                        ]
+                'DataTransforms': [
+                    {
+                        'ProjectOperation': {
+                            'ProjectedColumns': [
+                                'date', 'userid', 'username',
+                                'client_type', 'subscription_tier',
+                                'total_messages', 'chat_conversations',
+                                'credits_used', 'overage_cap',
+                                'overage_credits_used', 'overage_enabled', 'profileid',
+                            ]
+                        }
+                    },
+                    {
+                        'FilterOperation': {
+                            'ConditionExpression': 'date > parseDate("2026-02-10", "yyyy-MM-dd")'
+                        }
                     }
-                }]
+                ]
             }
         }
         params = dict(
