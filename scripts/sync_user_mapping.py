@@ -95,8 +95,9 @@ for raw_uid in sorted(raw_userids):
     if not clean_uid:
         continue
     name = get_display_name(clean_uid)
-    # 映射表存储原始 userid（与 Athena 表中一致）以便 JOIN
-    mapping.append((clean_uid, name))  # 使用 clean_uid 而不是 raw_uid
+    # 生成两种格式的映射：纯 UUID 和带前缀
+    mapping.append((clean_uid, name))  # 纯 UUID
+    mapping.append((f'{identity_store_id}.{clean_uid}', name))  # 带前缀
     print(f"  {clean_uid} → {name}")
 
 # ============================================
