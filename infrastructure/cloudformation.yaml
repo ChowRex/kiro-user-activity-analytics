@@ -200,7 +200,16 @@ Resources:
               raw_ids = set()
               for t in ['by_user_analytic','user_report']:
                   try:
-                      rows = run_query(f'SELECT DISTINCT userid FROM {GLUE_DB}.{t}')
+                      # 使用 CASE 语句提取纯 UUID
+                      query = f"""
+                          SELECT DISTINCT 
+                              CASE 
+                                  WHEN userid LIKE 'd-%' THEN split_part(userid, '.', 2)
+                                  ELSE userid
+                              END as userid_clean
+                          FROM {GLUE_DB}.{t}
+                      """
+                      rows = run_query(query)
                       print(f'  {t}: {len(rows)} userids')
                       for row in rows:
                           if row[0]: raw_ids.add(row[0])
@@ -209,15 +218,18 @@ Resources:
               for raw in sorted(raw_ids):
                   clean = raw.strip('"').strip()
                   if clean:
-                      mapping.append((raw, get_name(clean)))
+                      # 生成两种格式的映射
+                      name = get_name(clean)
+                      mapping.append((clean, name))  # 纯 UUID
+                      mapping.append((f'{IDENTITY_STORE_ID}.{clean}', name))  # 带前缀
               buf = io.StringIO()
               w = csv.writer(buf)
               w.writerow(['userid','username'])
               for uid, name in mapping: w.writerow([uid, name])
               s3.put_object(Bucket=BUCKET, Key=MAPPING_KEY, Body=buf.getvalue().encode('utf-8'), ContentType='text/csv')
               ensure_table()
-              print(f'Sync complete: {len(mapping)} users')
-              return {'users': len(mapping)}
+              print(f'Sync complete: {len(mapping)} mappings ({len(raw_ids)} users x 2 formats)')
+              return {'users': len(raw_ids), 'mappings': len(mapping)}
 
   # EventBridge 定时触发 - 每天 UTC 3:00
   UserMappingScheduleRule:

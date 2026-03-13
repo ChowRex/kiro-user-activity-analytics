@@ -6,3 +6,5 @@ config.yaml
 *.log
 .vscode/
 .idea/
+.venv/
+kiro-dev.json
