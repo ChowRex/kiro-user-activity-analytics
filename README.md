@@ -427,10 +427,10 @@ GROUP BY userid;
 
 ### 已知限制
 
-1. **部分用户名显示为 null**: 
-   - 原因：AWS 在 2026-03-10 改变了 `user_report` 表的 userid 格式（添加了 Identity Store ID 前缀）
-   - 影响：新格式的 userid 无法与 `user_mapping` 表的纯 UUID 匹配
-   - 解决方案：Athena 查询可以正常显示所有数据，QuickSight 中受影响的用户会显示为 null
+1. **userid 格式变更（已解决）**: 
+   - **问题**：AWS 在 2026-03-10 改变了 `user_report` 表的 userid 格式，从纯 UUID（如 `f448f448-...`）变为带 Identity Store ID 前缀（如 `d-90661af5ec.f448f448-...`）
+   - **影响**：新格式的 userid 无法与旧的 `user_mapping` 表匹配，导致 Dashboard 显示 null
+   - **解决方案**：`sync_user_mapping.py` 和 Lambda 函数已修复，为每个用户生成两种格式的映射记录，确保新旧格式都能正确匹配
 
 2. **历史数据延迟**: 
    - Kiro User Activity Report 有 1-2 天延迟
