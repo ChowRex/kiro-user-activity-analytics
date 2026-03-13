@@ -334,6 +334,25 @@ python3 scripts/sync_user_mapping.py
 
 **注意**：Lambda 函数每天 UTC 3:00 自动执行此操作。
 
+### 更新 Lambda 用户映射函数
+
+当 `scripts/sync_user_mapping.py` 修复后，需同步到 Lambda：
+
+```bash
+# 将修复后的代码保存为 /tmp/index.py（需使用环境变量：S3_BUCKET, GLUE_DATABASE, IDENTITY_STORE_ID）
+# 打包并更新
+cd /tmp && zip lambda_package.zip index.py
+aws lambda update-function-code \
+    --function-name kiro-user-mapping-sync \
+    --zip-file fileb:///tmp/lambda_package.zip \
+    --region <REGION>
+
+# 测试
+aws lambda invoke --function-name kiro-user-mapping-sync /tmp/out.json && cat /tmp/out.json
+```
+
+完整 Lambda 代码参考项目 commit 历史。
+
 ### 手动触发 SPICE 数据刷新
 
 SPICE 数据集每日 UTC 04:00 自动刷新。如需手动刷新：
@@ -383,7 +402,7 @@ GROUP BY userid;
 | QuickSight 数据源 `CREATION_FAILED` | S3 权限问题。先在 QuickSight Console → Manage QuickSight → Security & permissions → S3 中授权 bucket，然后重跑 `sh deploy.sh --from-step 6`（脚本会自动删除失败的数据源并重建） |
 | SPICE 刷新失败 | 检查 Athena 表是否可查询，确认 Lake Formation 表权限已授予 QuickSight Service Role。如果是删表重建导致权限丢失，重跑 `sh deploy.sh --from-step 3` |
 | Dashboard 数值显示为 0 或无数据 | 可能是 Glue 表列顺序与 CSV header 不匹配。用 `SELECT * FROM kiro_analytics.user_report LIMIT 1` 验证列值是否合理，如不对需要修正表定义并重跑 `sh deploy.sh --from-step 3` |
-| 用户名显示为 UUID 或 null | 运行 `python3 scripts/sync_user_mapping.py` 手动同步映射。如果 Identity Center 重建过用户目录，历史 userid 将无法解析 |
+| 用户名显示为 UUID 或 null | 1. 运行 `python3 scripts/sync_user_mapping.py` 手动同步映射<br>2. 如果本地同步成功但 Dashboard 仍显示错误，需更新 Lambda 函数代码（参考"更新 Lambda 用户映射函数"）<br>3. 如果 Identity Center 重建过用户目录，历史 userid 将无法解析 |
 | 仪表板图表为空 | 1. 检查 Athena 表有数据：`SELECT COUNT(*) FROM kiro_analytics.user_report`<br>2. 检查 SPICE 导入状态：QuickSight Console → Datasets → 查看最近导入<br>3. 手动触发 SPICE 刷新 |
 | 趋势图不显示线条 | date 字段需要是 DATETIME 类型。确认 `scripts/create_datasets.py` 中有 date 类型转换，重新运行 `python3 scripts/create_datasets.py` |
 | S3 没有新数据 | 报告有 1-2 天延迟，确认 Kiro User Activity Report 已开启 |
