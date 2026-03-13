@@ -221,7 +221,7 @@ Resources:
                       # 生成两种格式的映射
                       name = get_name(clean)
                       mapping.append((clean, name))  # 纯 UUID
-                      mapping.append((f'{IDENTITY_STORE_ID}.{clean}', name))  # 带前缀
+                      mapping.append((f'{ID_STORE}.{clean}', name))  # 带前缀
               buf = io.StringIO()
               w = csv.writer(buf)
               w.writerow(['userid','username'])

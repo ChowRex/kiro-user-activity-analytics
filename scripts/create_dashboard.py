@@ -63,8 +63,9 @@ def line(vid, title, ds, date_col, value_cols):
         'VisualId': vid,
         'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
         'ChartConfiguration': {'FieldWells': {'LineChartAggregatedFieldWells': {
-            'Category': [{'CategoricalDimensionField': {
-                'FieldId': 'date', 'Column': {'DataSetIdentifier': ds, 'ColumnName': date_col}
+            'Category': [{'DateDimensionField': {
+                'FieldId': 'date', 'Column': {'DataSetIdentifier': ds, 'ColumnName': date_col},
+                'DateGranularity': 'DAY'
             }}],
             'Values': values
         }}}
@@ -183,9 +184,10 @@ definition = {
                     'VisualId': 'd-line-user-credits',
                     'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '每日每用户 Credit 消耗趋势'}},
                     'ChartConfiguration': {'FieldWells': {'LineChartAggregatedFieldWells': {
-                        'Category': [{'CategoricalDimensionField': {
+                        'Category': [{'DateDimensionField': {
                             'FieldId': 'uc_date',
-                            'Column': {'DataSetIdentifier': CR, 'ColumnName': 'date'}
+                            'Column': {'DataSetIdentifier': CR, 'ColumnName': 'date'},
+                            'DateGranularity': 'DAY'
                         }}],
                         'Values': [{'NumericalMeasureField': {
                             'FieldId': 'uc_credits',

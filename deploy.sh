@@ -385,7 +385,7 @@ python3 scripts/create_datasets.py
 echo ""
 
 echo "7️⃣  发布 QuickSight Dashboard..."
-python3 scripts/create_dashboard_publish.py
+python3 scripts/create_dashboard.py
 echo ""
 fi # step 6
 
