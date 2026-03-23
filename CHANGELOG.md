@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-23
+
+### Added
+- **用户概况 Sheet**：新增 Dashboard 第 4 个 Tab，按自然月展示用户使用情况
+  - 每月用户 Credit 消耗柱状图（按用户分色）
+  - 每月用户活跃天数柱状图（按用户分色）
+  - 用户月度概况表：含层级变化追踪（如 `PRO → PRO_PLUS`）、客户端类型、活跃天数等
+- **Athena 视图 `user_summary`**：按自然月聚合用户数据，支持层级变化追踪
+- **QuickSight 数据集 `kiro-user-summary-dataset`**：基于 user_summary 视图，SPICE 模式，每日自动刷新
+- deploy.sh 步骤 3 自动创建 user_summary 视图并授权 Lake Formation 权限
+
 ## [1.1.1] - 2026-03-23
 
 ### Fixed

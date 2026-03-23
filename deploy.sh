@@ -318,6 +318,52 @@ echo ""
 fi # step 3
 
 # ============================================
+# 3.5 创建 Athena 视图（用户月度概况）
+# ============================================
+if [ "$FROM_STEP" -le 3 ]; then
+echo "  创建 Athena 视图 user_summary..."
+aws athena start-query-execution \
+    --query-string "
+CREATE OR REPLACE VIEW ${GLUE_DB}.user_summary AS
+SELECT 
+  m.username,
+  date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') as month,
+  array_join(array_sort(array_agg(DISTINCT r.subscription_tier)), ' → ') as tier_history,
+  array_join(array_sort(array_agg(DISTINCT r.client_type)), ' / ') as client_types,
+  SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
+  SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
+  SUM(CAST(r.total_messages AS INTEGER)) as total_messages,
+  SUM(CAST(r.chat_conversations AS INTEGER)) as total_conversations,
+  MIN(r.date) as first_seen,
+  MAX(r.date) as last_seen,
+  COUNT(DISTINCT r.date) as active_days
+FROM ${GLUE_DB}.user_report r
+LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
+WHERE r.date > '2026-02-10'
+GROUP BY m.username, date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m')
+" \
+    --work-group $WORKGROUP \
+    --region $REGION \
+    --output text > /dev/null
+sleep 5
+
+# 授权 user_summary 视图
+for PRINCIPAL_PAIR in \
+    "$(aws sts get-caller-identity --query 'Arn' --output text)|SELECT DESCRIBE" \
+    "$QS_ROLE_ARN|SELECT DESCRIBE" \
+    "IAM_ALLOWED_PRINCIPALS|SELECT DESCRIBE"; do
+    IFS='|' read -r P PERMS <<< "$PRINCIPAL_PAIR"
+    aws lakeformation grant-permissions \
+        --principal "DataLakePrincipalIdentifier=$P" \
+        --resource "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"user_summary\"}}" \
+        --permissions $PERMS \
+        --region $REGION 2>/dev/null || true
+done
+echo "  ✓ user_summary 视图创建完成"
+echo ""
+fi # step 3.5
+
+# ============================================
 # 4. 验证 Athena 数据查询
 # ============================================
 if [ "$FROM_STEP" -le 4 ]; then

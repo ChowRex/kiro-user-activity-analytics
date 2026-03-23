@@ -12,6 +12,7 @@ user_arn = config['quicksight']['user_arn']
 
 ACTIVITY_DS_ARN = f"arn:aws:quicksight:{region}:{aid}:dataset/kiro-user-activity-dataset"
 CREDITS_DS_ARN = f"arn:aws:quicksight:{region}:{aid}:dataset/kiro-user-credits-dataset"
+SUMMARY_DS_ARN = f"arn:aws:quicksight:{region}:{aid}:dataset/kiro-user-summary-dataset"
 
 DASHBOARD_ID = 'kiro-comprehensive-dashboard'
 DASHBOARD_NAME = 'Kiro 综合仪表板'
@@ -128,11 +129,13 @@ def table(vid, title, ds, group_cols, value_cols):
 # ============================================
 CR = 'credits'   # credits dataset identifier
 AC = 'activity'  # activity dataset identifier
+SM = 'summary'   # summary dataset identifier
 
 definition = {
     'DataSetIdentifierDeclarations': [
         {'Identifier': CR, 'DataSetArn': CREDITS_DS_ARN},
         {'Identifier': AC, 'DataSetArn': ACTIVITY_DS_ARN},
+        {'Identifier': SM, 'DataSetArn': SUMMARY_DS_ARN},
     ],
     'Sheets': [
         # Sheet 1: 概览 (credits dataset)
@@ -209,6 +212,71 @@ definition = {
                        ('t_overage', 'overage_credits_used', 'SUM'),
                        ('t_cap', 'overage_cap', 'MAX'),
                        ('t_msgs', 'total_messages', 'SUM')]),
+            ]
+        },
+        # Sheet 4: 用户概况 (summary dataset)
+        {
+            'SheetId': 'sheet-user-summary',
+            'Name': '用户概况',
+            'Visuals': [
+                kpi('d-kpi-total-users', '总用户数', SM, 'username', 'DISTINCT_COUNT'),
+                kpi('d-kpi-total-days', '总活跃天数', SM, 'active_days', 'SUM'),
+                # 每月用户 Credit 消耗柱状图（按用户分色）
+                {'BarChartVisual': {
+                    'VisualId': 'd-bar-monthly-credits',
+                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '每月用户 Credit 消耗'}},
+                    'ChartConfiguration': {'FieldWells': {'BarChartAggregatedFieldWells': {
+                        'Category': [{'CategoricalDimensionField': {
+                            'FieldId': 'sm_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}
+                        }}],
+                        'Values': [{'NumericalMeasureField': {
+                            'FieldId': 'sm_credits', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_credits'},
+                            'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}
+                        }}],
+                        'Colors': [{'CategoricalDimensionField': {
+                            'FieldId': 'sm_user', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}
+                        }}]
+                    }}, 'Orientation': 'HORIZONTAL'}
+                }},
+                # 每月活跃天数柱状图（按用户分色）
+                {'BarChartVisual': {
+                    'VisualId': 'd-bar-monthly-days',
+                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '每月用户活跃天数'}},
+                    'ChartConfiguration': {'FieldWells': {'BarChartAggregatedFieldWells': {
+                        'Category': [{'CategoricalDimensionField': {
+                            'FieldId': 'sd_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}
+                        }}],
+                        'Values': [{'NumericalMeasureField': {
+                            'FieldId': 'sd_days', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'active_days'},
+                            'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}
+                        }}],
+                        'Colors': [{'CategoricalDimensionField': {
+                            'FieldId': 'sd_user', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}
+                        }}]
+                    }}, 'Orientation': 'HORIZONTAL'}
+                }},
+                # 用户月度明细表
+                {'TableVisual': {
+                    'VisualId': 'd-table-user-summary',
+                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '用户月度概况'}},
+                    'ChartConfiguration': {
+                        'FieldWells': {'TableAggregatedFieldWells': {
+                            'GroupBy': [
+                                {'CategoricalDimensionField': {'FieldId': 's_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}}},
+                                {'CategoricalDimensionField': {'FieldId': 's_name', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}}},
+                                {'CategoricalDimensionField': {'FieldId': 's_tier', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'tier_history'}}},
+                                {'CategoricalDimensionField': {'FieldId': 's_client', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'client_types'}}},
+                            ],
+                            'Values': [
+                                {'NumericalMeasureField': {'FieldId': 's_credits', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_credits'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                                {'NumericalMeasureField': {'FieldId': 's_msgs', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_messages'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                                {'NumericalMeasureField': {'FieldId': 's_days', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'active_days'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                                {'NumericalMeasureField': {'FieldId': 's_convs', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_conversations'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                            ]
+                        }},
+                        'SortConfiguration': {'RowSort': [{'FieldSort': {'FieldId': 's_credits', 'Direction': 'DESC'}}]},
+                    }
+                }},
             ]
         },
     ]
