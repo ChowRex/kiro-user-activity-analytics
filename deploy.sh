@@ -384,10 +384,12 @@ echo "  创建 Athena 视图 user_summary..."
 aws athena start-query-execution \
     --query-string "
 CREATE OR REPLACE VIEW ${GLUE_DB}.user_summary AS
-WITH monthly_data AS (
+WITH current_month AS (
+  SELECT date_format(current_date, '%Y-%m') as month
+),
+monthly_data AS (
   SELECT 
     m.username,
-    date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') as month,
     array_join(array_sort(array_agg(DISTINCT r.subscription_tier)), ' → ') as tier_history,
     MAX(CASE 
       WHEN r.subscription_tier = 'POWER' THEN 10000
@@ -404,16 +406,13 @@ WITH monthly_data AS (
     COUNT(DISTINCT r.date) as active_days
   FROM ${GLUE_DB}.user_report r
   LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
-  WHERE r.date > '2026-02-10'
-  GROUP BY m.username, date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m')
+  WHERE date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') = (SELECT month FROM current_month)
+  GROUP BY m.username
 ),
 all_users AS (
   SELECT DISTINCT username FROM ${GLUE_DB}.user_mapping WHERE userid NOT LIKE 'd-%'
-),
-current_month AS (
-  SELECT date_format(current_date, '%Y-%m') as month
 )
-SELECT d.username, d.month, d.tier_history, d.client_types,
+SELECT d.username, (SELECT month FROM current_month) as month, d.tier_history, d.client_types,
   d.total_credits, d.total_overage, d.total_messages, d.total_conversations,
   d.first_seen, d.last_seen, d.active_days,
   d.capacity,
@@ -430,15 +429,14 @@ SELECT d.username, d.month, d.tier_history, d.client_types,
   END as activity_level
 FROM monthly_data d
 UNION ALL
-SELECT u.username, cm.month, '-' as tier_history, '-' as client_types,
+SELECT u.username, (SELECT month FROM current_month) as month, '-' as tier_history, '-' as client_types,
   0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
   NULL as first_seen, NULL as last_seen, 0 as active_days,
   0 as capacity, 0.0 as usage_pct,
   0 as is_active,
   '🔴 不活跃' as activity_level
 FROM all_users u
-CROSS JOIN current_month cm
-WHERE u.username NOT IN (SELECT username FROM monthly_data WHERE month = cm.month)
+WHERE u.username NOT IN (SELECT username FROM monthly_data)
 " \
     --work-group $WORKGROUP \
     --region $REGION \

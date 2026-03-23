@@ -218,14 +218,6 @@ definition = {
         {
             'SheetId': 'sheet-user-summary',
             'Name': '用户概况',
-            'FilterControls': [{
-                'Dropdown': {
-                    'FilterControlId': 'fc-month',
-                    'Title': '选择月份',
-                    'SourceFilterId': 'filter-month',
-                    'DisplayOptions': {'SelectAllOptions': {'Visibility': 'VISIBLE'}},
-                }
-            }],
             'Visuals': [
                 kpi('d-kpi-total-users', '总用户数', SM, 'username', 'DISTINCT_COUNT'),
                 kpi('d-kpi-active-users', '活跃用户数', SM, 'is_active', 'SUM'),
@@ -264,21 +256,6 @@ definition = {
             ]
         },
     ],
-    'FilterGroups': [{
-        'FilterGroupId': 'fg-month',
-        'Filters': [{
-            'CategoryFilter': {
-                'FilterId': 'filter-month',
-                'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'},
-                'Configuration': {'FilterListConfiguration': {'MatchOperator': 'CONTAINS', 'SelectAllOptions': 'FILTER_ALL_VALUES'}},
-            }
-        }],
-        'ScopeConfiguration': {'SelectedSheets': {'SheetVisualScopingConfigurations': [{
-            'SheetId': 'sheet-user-summary',
-            'Scope': 'ALL_VISUALS'
-        }]}},
-        'CrossDataset': 'SINGLE_DATASET',
-    }]
 }
 
 
