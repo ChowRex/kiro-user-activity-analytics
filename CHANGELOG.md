@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.3.0] - 2026-03-23
 
+### Added
+- **表格序号列**：用户概况表和成本分析表均新增 `row_num` 排名序号，方便快速识别活跃用户数量
+- **Athena 视图 `credit_summary`**：Credit 汇总视图，按消耗降序排名，含序号
+- **QuickSight 数据集 `kiro-credit-summary-dataset`**：基于 credit_summary 视图，SPICE 模式，每日自动刷新
+- **Lambda 代码自动同步**：deploy.sh 步骤 1 在 CloudFormation 部署后，自动从 `cloudformation.yaml` 提取 Lambda inline code 并通过 `update-function-code` 强制更新，解决 CloudFormation 不检测 inline code 变更的问题
+
 ### Changed
 - **用户概况 Sheet 改进**：
   - 视图 `user_summary` 改为只查询当前自然月数据（不再包含历史月份）
@@ -15,7 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - 柱状图改为按用户分组降序排列（不再按月分色），一眼可见消耗/活跃排名
   - 明细表增加容量（capacity）、使用率（usage_pct）、活跃度（activity_level）字段
 - **活跃度按订阅容量比例计算**：PRO=1000, PRO_PLUS=2000, POWER=10000，根据 usage_pct 划分 6 个等级
-- **用户映射同步**：`sync_user_mapping.py` 和 Lambda 改为拉取 Identity Center 全部用户（57 人），不再仅拉取有使用记录的用户
+- **用户映射同步**：`sync_user_mapping.py` 和 Lambda 改为拉取 Identity Center 全部用户，不再仅拉取有使用记录的用户
+- **成本分析表格**：改用 `credit_summary` 数据集，含排名序号
+- **deploy.sh 步骤 6/7 拆分**：`--from-step 7` 现在可以单独更新 Dashboard
+
+### Fixed
+- README 中 3 处 `create_dashboard_publish.py` 修正为 `create_dashboard.py`
 
 ## [1.2.0] - 2026-03-23
 
@@ -26,7 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - 用户月度概况表：含层级变化追踪（如 `PRO → PRO_PLUS`）、客户端类型、活跃天数等
 - **Athena 视图 `user_summary`**：按自然月聚合用户数据，支持层级变化追踪
 - **QuickSight 数据集 `kiro-user-summary-dataset`**：基于 user_summary 视图，SPICE 模式，每日自动刷新
-- deploy.sh 步骤 3 自动创建 user_summary 视图并授权 Lake Formation 权限
+- deploy.sh 步骤 5.5 自动创建 user_summary 视图并授权 Lake Formation 权限
 
 ## [1.1.1] - 2026-03-23
 
