@@ -263,6 +263,7 @@ definition = {
                         'FieldWells': {'TableAggregatedFieldWells': {
                             'GroupBy': [
                                 {'CategoricalDimensionField': {'FieldId': 's_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}}},
+                                {'CategoricalDimensionField': {'FieldId': 's_level', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'activity_level'}}},
                                 {'CategoricalDimensionField': {'FieldId': 's_name', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}}},
                                 {'CategoricalDimensionField': {'FieldId': 's_tier', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'tier_history'}}},
                                 {'CategoricalDimensionField': {'FieldId': 's_client', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'client_types'}}},
@@ -271,10 +272,12 @@ definition = {
                                 {'NumericalMeasureField': {'FieldId': 's_credits', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_credits'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
                                 {'NumericalMeasureField': {'FieldId': 's_msgs', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_messages'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
                                 {'NumericalMeasureField': {'FieldId': 's_days', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'active_days'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
-                                {'NumericalMeasureField': {'FieldId': 's_convs', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_conversations'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
                             ]
                         }},
-                        'SortConfiguration': {'RowSort': [{'FieldSort': {'FieldId': 's_credits', 'Direction': 'DESC'}}]},
+                        'SortConfiguration': {'RowSort': [
+                            {'FieldSort': {'FieldId': 's_month', 'Direction': 'DESC'}},
+                            {'FieldSort': {'FieldId': 's_credits', 'Direction': 'DESC'}},
+                        ]},
                     }
                 }},
             ]

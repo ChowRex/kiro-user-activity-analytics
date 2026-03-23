@@ -384,22 +384,51 @@ echo "  创建 Athena 视图 user_summary..."
 aws athena start-query-execution \
     --query-string "
 CREATE OR REPLACE VIEW ${GLUE_DB}.user_summary AS
-SELECT 
-  m.username,
-  date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') as month,
-  array_join(array_sort(array_agg(DISTINCT r.subscription_tier)), ' → ') as tier_history,
-  array_join(array_sort(array_agg(DISTINCT r.client_type)), ' / ') as client_types,
-  SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
-  SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
-  SUM(CAST(r.total_messages AS INTEGER)) as total_messages,
-  SUM(CAST(r.chat_conversations AS INTEGER)) as total_conversations,
-  MIN(r.date) as first_seen,
-  MAX(r.date) as last_seen,
-  COUNT(DISTINCT r.date) as active_days
-FROM ${GLUE_DB}.user_report r
-LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
-WHERE r.date > '2026-02-10'
-GROUP BY m.username, date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m')
+WITH monthly_data AS (
+  SELECT 
+    m.username,
+    date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') as month,
+    array_join(array_sort(array_agg(DISTINCT r.subscription_tier)), ' → ') as tier_history,
+    array_join(array_sort(array_agg(DISTINCT r.client_type)), ' / ') as client_types,
+    SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
+    SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
+    SUM(CAST(r.total_messages AS INTEGER)) as total_messages,
+    SUM(CAST(r.chat_conversations AS INTEGER)) as total_conversations,
+    MIN(r.date) as first_seen,
+    MAX(r.date) as last_seen,
+    COUNT(DISTINCT r.date) as active_days
+  FROM ${GLUE_DB}.user_report r
+  LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
+  WHERE r.date > '2026-02-10'
+  GROUP BY m.username, date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m')
+),
+all_users AS (
+  SELECT DISTINCT username FROM ${GLUE_DB}.user_mapping WHERE userid NOT LIKE 'd-%'
+),
+current_month AS (
+  SELECT date_format(current_date, '%Y-%m') as month
+)
+SELECT d.username, d.month, d.tier_history, d.client_types,
+  d.total_credits, d.total_overage, d.total_messages, d.total_conversations,
+  d.first_seen, d.last_seen, d.active_days,
+  CASE
+    WHEN d.tier_history LIKE '%→%' THEN '🔶 升级用户'
+    WHEN d.total_credits >= 800 THEN '🟣 超高活跃'
+    WHEN d.total_credits >= 500 THEN '🟢 高活跃'
+    WHEN d.total_credits >= 100 THEN '🔵 一般活跃'
+    WHEN d.total_credits >= 50 THEN '🟠 稍低活跃'
+    WHEN d.total_credits > 0 THEN '🟡 低活跃'
+    ELSE '🔴 不活跃'
+  END as activity_level
+FROM monthly_data d
+UNION ALL
+SELECT u.username, cm.month, '-' as tier_history, '-' as client_types,
+  0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
+  NULL as first_seen, NULL as last_seen, 0 as active_days,
+  '🔴 不活跃' as activity_level
+FROM all_users u
+CROSS JOIN current_month cm
+WHERE u.username NOT IN (SELECT username FROM monthly_data WHERE month = cm.month)
 " \
     --work-group $WORKGROUP \
     --region $REGION \
