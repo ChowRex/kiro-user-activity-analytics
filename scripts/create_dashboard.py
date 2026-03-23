@@ -220,7 +220,7 @@ definition = {
             'Name': '用户概况',
             'Visuals': [
                 kpi('d-kpi-total-users', '总用户数', SM, 'username', 'DISTINCT_COUNT'),
-                kpi('d-kpi-total-credits', '总 Credit 消耗', SM, 'total_credits', 'SUM'),
+                kpi('d-kpi-active-users', '活跃用户数', SM, 'is_active', 'SUM'),
                 # 每月用户 Credit 消耗柱状图（按用户分色）
                 {'BarChartVisual': {
                     'VisualId': 'd-bar-monthly-credits',

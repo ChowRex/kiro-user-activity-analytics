@@ -418,6 +418,7 @@ SELECT d.username, d.month, d.tier_history, d.client_types,
   d.first_seen, d.last_seen, d.active_days,
   d.capacity,
   ROUND(d.total_credits * 100.0 / d.capacity, 1) as usage_pct,
+  1 as is_active,
   CASE
     WHEN d.tier_history LIKE '%→%' THEN '🔶 升级用户'
     WHEN d.total_credits * 100.0 / d.capacity >= 80 THEN '🟣 超高活跃'
@@ -433,6 +434,7 @@ SELECT u.username, cm.month, '-' as tier_history, '-' as client_types,
   0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
   NULL as first_seen, NULL as last_seen, 0 as active_days,
   0 as capacity, 0.0 as usage_pct,
+  0 as is_active,
   '🔴 不活跃' as activity_level
 FROM all_users u
 CROSS JOIN current_month cm
