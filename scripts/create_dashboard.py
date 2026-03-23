@@ -130,12 +130,16 @@ def table(vid, title, ds, group_cols, value_cols):
 CR = 'credits'   # credits dataset identifier
 AC = 'activity'  # activity dataset identifier
 SM = 'summary'   # summary dataset identifier
+CS = 'credit_summary'  # credit summary dataset identifier
+
+CREDIT_SUMMARY_DS_ARN = f"arn:aws:quicksight:{region}:{aid}:dataset/kiro-credit-summary-dataset"
 
 definition = {
     'DataSetIdentifierDeclarations': [
         {'Identifier': CR, 'DataSetArn': CREDITS_DS_ARN},
         {'Identifier': AC, 'DataSetArn': ACTIVITY_DS_ARN},
         {'Identifier': SM, 'DataSetArn': SUMMARY_DS_ARN},
+        {'Identifier': CS, 'DataSetArn': CREDIT_SUMMARY_DS_ARN},
     ],
     'Sheets': [
         # Sheet 1: 概览 (credits dataset)
@@ -206,12 +210,29 @@ definition = {
                 bar('d-bar-tier-cost', '各层级平均 Credit 消耗', CR, 'subscription_tier',
                     [('avg_cr', 'credits_used', 'AVERAGE'),
                      ('avg_cap', 'overage_cap', 'AVERAGE')]),
-                table('d-table-cost', '用户 Credit 使用明细', CR,
-                      ['username', 'subscription_tier', 'client_type'],
-                      [('t_credits', 'credits_used', 'SUM'),
-                       ('t_overage', 'overage_credits_used', 'SUM'),
-                       ('t_cap', 'overage_cap', 'MAX'),
-                       ('t_msgs', 'total_messages', 'SUM')]),
+                {'TableVisual': {
+                    'VisualId': 'd-table-cost',
+                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '用户 Credit 使用明细'}},
+                    'ChartConfiguration': {
+                        'FieldWells': {'TableAggregatedFieldWells': {
+                            'GroupBy': [
+                                {'NumericalDimensionField': {'FieldId': 'cs_row', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'row_num'}}},
+                                {'CategoricalDimensionField': {'FieldId': 'cs_name', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'username'}}},
+                                {'CategoricalDimensionField': {'FieldId': 'cs_tier', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'subscription_tier'}}},
+                                {'CategoricalDimensionField': {'FieldId': 'cs_client', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'client_type'}}},
+                            ],
+                            'Values': [
+                                {'NumericalMeasureField': {'FieldId': 'cs_credits', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'total_credits'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                                {'NumericalMeasureField': {'FieldId': 'cs_overage', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'total_overage'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                                {'NumericalMeasureField': {'FieldId': 'cs_cap', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'overage_cap'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}},
+                                {'NumericalMeasureField': {'FieldId': 'cs_msgs', 'Column': {'DataSetIdentifier': CS, 'ColumnName': 'total_messages'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                            ]
+                        }},
+                        'SortConfiguration': {'RowSort': [
+                            {'FieldSort': {'FieldId': 'cs_row', 'Direction': 'ASC'}},
+                        ]},
+                    }
+                }},
             ]
         },
         # Sheet 4: 用户概况 (summary dataset)
@@ -234,7 +255,7 @@ definition = {
                     'ChartConfiguration': {
                         'FieldWells': {'TableAggregatedFieldWells': {
                             'GroupBy': [
-                                {'CategoricalDimensionField': {'FieldId': 's_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}}},
+                                {'NumericalDimensionField': {'FieldId': 's_row', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'row_num'}}},
                                 {'CategoricalDimensionField': {'FieldId': 's_level', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'activity_level'}}},
                                 {'CategoricalDimensionField': {'FieldId': 's_name', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}}},
                                 {'CategoricalDimensionField': {'FieldId': 's_tier', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'tier_history'}}},
@@ -248,8 +269,7 @@ definition = {
                             ]
                         }},
                         'SortConfiguration': {'RowSort': [
-                            {'FieldSort': {'FieldId': 's_month', 'Direction': 'DESC'}},
-                            {'FieldSort': {'FieldId': 's_credits', 'Direction': 'DESC'}},
+                            {'FieldSort': {'FieldId': 's_row', 'Direction': 'ASC'}},
                         ]},
                     }
                 }},

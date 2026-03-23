@@ -435,39 +435,74 @@ monthly_data AS (
 ),
 all_users AS (
   SELECT DISTINCT username FROM ${GLUE_DB}.user_mapping WHERE userid NOT LIKE 'd-%'
+),
+combined AS (
+  SELECT d.username, (SELECT month FROM current_month) as month, d.tier_history, d.client_types,
+    d.total_credits, d.total_overage, d.total_messages, d.total_conversations,
+    d.first_seen, d.last_seen, d.active_days,
+    d.capacity,
+    ROUND(d.total_credits * 100.0 / d.capacity, 1) as usage_pct,
+    1 as is_active,
+    CASE
+      WHEN d.tier_history LIKE '%→%' THEN '🔶 升级用户'
+      WHEN d.total_credits * 100.0 / d.capacity >= 80 THEN '🟣 超高活跃'
+      WHEN d.total_credits * 100.0 / d.capacity >= 50 THEN '🟢 高活跃'
+      WHEN d.total_credits * 100.0 / d.capacity >= 10 THEN '🔵 一般活跃'
+      WHEN d.total_credits * 100.0 / d.capacity >= 5 THEN '🟠 稍低活跃'
+      WHEN d.total_credits > 0 THEN '🟡 低活跃'
+      ELSE '🔴 不活跃'
+    END as activity_level
+  FROM monthly_data d
+  UNION ALL
+  SELECT u.username, (SELECT month FROM current_month) as month, '-' as tier_history, '-' as client_types,
+    0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
+    NULL as first_seen, NULL as last_seen, 0 as active_days,
+    0 as capacity, 0.0 as usage_pct,
+    0 as is_active,
+    '🔴 不活跃' as activity_level
+  FROM all_users u
+  WHERE u.username NOT IN (SELECT username FROM monthly_data)
 )
-SELECT d.username, (SELECT month FROM current_month) as month, d.tier_history, d.client_types,
-  d.total_credits, d.total_overage, d.total_messages, d.total_conversations,
-  d.first_seen, d.last_seen, d.active_days,
-  d.capacity,
-  ROUND(d.total_credits * 100.0 / d.capacity, 1) as usage_pct,
-  1 as is_active,
-  CASE
-    WHEN d.tier_history LIKE '%→%' THEN '🔶 升级用户'
-    WHEN d.total_credits * 100.0 / d.capacity >= 80 THEN '🟣 超高活跃'
-    WHEN d.total_credits * 100.0 / d.capacity >= 50 THEN '🟢 高活跃'
-    WHEN d.total_credits * 100.0 / d.capacity >= 10 THEN '🔵 一般活跃'
-    WHEN d.total_credits * 100.0 / d.capacity >= 5 THEN '🟠 稍低活跃'
-    WHEN d.total_credits > 0 THEN '🟡 低活跃'
-    ELSE '🔴 不活跃'
-  END as activity_level
-FROM monthly_data d
-UNION ALL
-SELECT u.username, (SELECT month FROM current_month) as month, '-' as tier_history, '-' as client_types,
-  0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
-  NULL as first_seen, NULL as last_seen, 0 as active_days,
-  0 as capacity, 0.0 as usage_pct,
-  0 as is_active,
-  '🔴 不活跃' as activity_level
-FROM all_users u
-WHERE u.username NOT IN (SELECT username FROM monthly_data)
+SELECT CAST(ROW_NUMBER() OVER (ORDER BY is_active DESC, total_credits DESC) AS INTEGER) as row_num,
+  username, month, tier_history, client_types,
+  total_credits, total_overage, total_messages, total_conversations,
+  first_seen, last_seen, active_days, capacity, usage_pct, is_active, activity_level
+FROM combined
 " \
     --work-group $WORKGROUP \
     --region $REGION \
     --output text > /dev/null
 sleep 5
 
-# 授权 user_summary 视图
+# 授权 user_summary 和 credit_summary 视图
+echo "  创建 Athena 视图 credit_summary..."
+aws athena start-query-execution \
+    --query-string "
+CREATE OR REPLACE VIEW ${GLUE_DB}.credit_summary AS
+WITH base AS (
+  SELECT
+    m.username,
+    r.subscription_tier,
+    r.client_type,
+    SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
+    SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
+    MAX(CAST(r.overage_cap AS DECIMAL(10,2))) as overage_cap,
+    SUM(CAST(r.total_messages AS INTEGER)) as total_messages
+  FROM ${GLUE_DB}.user_report r
+  LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
+  WHERE r.date > '2026-02-10'
+  GROUP BY m.username, r.subscription_tier, r.client_type
+)
+SELECT CAST(ROW_NUMBER() OVER (ORDER BY total_credits DESC) AS INTEGER) as row_num,
+  username, subscription_tier, client_type, total_credits, total_overage, overage_cap, total_messages
+FROM base
+" \
+    --work-group $WORKGROUP \
+    --region $REGION \
+    --output text > /dev/null
+sleep 5
+
+for VIEW_NAME in user_summary credit_summary; do
 for PRINCIPAL_PAIR in \
     "$(aws sts get-caller-identity --query 'Arn' --output text)|SELECT DESCRIBE" \
     "$QS_ROLE_ARN|SELECT DESCRIBE" \
@@ -475,11 +510,12 @@ for PRINCIPAL_PAIR in \
     IFS='|' read -r P PERMS <<< "$PRINCIPAL_PAIR"
     aws lakeformation grant-permissions \
         --principal "DataLakePrincipalIdentifier=$P" \
-        --resource "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"user_summary\"}}" \
+        --resource "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"$VIEW_NAME\"}}" \
         --permissions $PERMS \
         --region $REGION 2>/dev/null || true
 done
-echo "  ✓ user_summary 视图创建完成"
+done
+echo "  ✓ user_summary / credit_summary 视图创建完成"
 echo ""
 fi # step 5.5
 

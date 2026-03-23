@@ -366,6 +366,7 @@ class QuickSightDeployer:
                         'DataSourceArn': ds_arn, 'Catalog': 'AwsDataCatalog',
                         'Schema': db, 'Name': 'user_summary',
                         'InputColumns': [
+                            {'Name': 'row_num', 'Type': 'INTEGER'},
                             {'Name': 'username', 'Type': 'STRING'},
                             {'Name': 'month', 'Type': 'STRING'},
                             {'Name': 'tier_history', 'Type': 'STRING'},
@@ -413,6 +414,61 @@ class QuickSightDeployer:
         self._trigger_ingestion('kiro-user-summary-dataset')
         self._create_refresh_schedule('kiro-user-summary-dataset', 'summary-daily-refresh')
         return 'kiro-user-summary-dataset'
+
+    def create_credit_summary_dataset(self, data_source_id):
+        """创建 Credit 汇总数据集（基于 Athena 视图 credit_summary，含序号）"""
+        ds_arn = f"arn:aws:quicksight:{self.config['aws']['region']}:{self.account_id}:datasource/{data_source_id}"
+        db = self.config['glue']['database_name']
+        params = dict(
+            AwsAccountId=self.account_id,
+            DataSetId='kiro-credit-summary-dataset',
+            Name='KiroCreditSummaryDataset',
+            PhysicalTableMap={
+                'creditsummary': {
+                    'RelationalTable': {
+                        'DataSourceArn': ds_arn, 'Catalog': 'AwsDataCatalog',
+                        'Schema': db, 'Name': 'credit_summary',
+                        'InputColumns': [
+                            {'Name': 'row_num', 'Type': 'INTEGER'},
+                            {'Name': 'username', 'Type': 'STRING'},
+                            {'Name': 'subscription_tier', 'Type': 'STRING'},
+                            {'Name': 'client_type', 'Type': 'STRING'},
+                            {'Name': 'total_credits', 'Type': 'DECIMAL'},
+                            {'Name': 'total_overage', 'Type': 'DECIMAL'},
+                            {'Name': 'overage_cap', 'Type': 'DECIMAL'},
+                            {'Name': 'total_messages', 'Type': 'INTEGER'},
+                        ]
+                    }
+                }
+            },
+            LogicalTableMap={
+                'credit-summary-base': {
+                    'Alias': 'creditsummary',
+                    'Source': {'PhysicalTableId': 'creditsummary'},
+                }
+            },
+            ImportMode='SPICE',
+            Permissions=[{
+                'Principal': self.config['quicksight']['user_arn'],
+                'Actions': [
+                    'quicksight:DescribeDataSet', 'quicksight:DescribeDataSetPermissions',
+                    'quicksight:PassDataSet', 'quicksight:DescribeIngestion',
+                    'quicksight:ListIngestions', 'quicksight:UpdateDataSet',
+                    'quicksight:DeleteDataSet', 'quicksight:CreateIngestion',
+                    'quicksight:CancelIngestion', 'quicksight:UpdateDataSetPermissions'
+                ]
+            }]
+        )
+        try:
+            self.qs.create_data_set(**params)
+            print(f"✓ Credit 汇总数据集创建成功 (SPICE 模式)")
+        except self.qs.exceptions.ResourceExistsException:
+            del params['Permissions']
+            self.qs.update_data_set(**params)
+            print(f"✓ Credit 汇总数据集已更新 (SPICE 模式)")
+        self._trigger_ingestion('kiro-credit-summary-dataset')
+        self._create_refresh_schedule('kiro-credit-summary-dataset', 'credit-summary-daily-refresh')
+        return 'kiro-credit-summary-dataset'
 
     def _trigger_ingestion(self, dataset_id):
         """触发 SPICE 数据导入"""
@@ -470,6 +526,7 @@ class QuickSightDeployer:
         dataset_id = self.create_dataset(data_source_id)
         credits_dataset_id = self.create_credits_dataset(data_source_id)
         summary_dataset_id = self.create_summary_dataset(data_source_id)
+        credit_summary_dataset_id = self.create_credit_summary_dataset(data_source_id)
 
         print("\n✓ 数据源和数据集部署完成 (SPICE 模式，每日自动刷新)")
         print(f"\n访问 QuickSight 控制台查看: https://{self.config['aws']['region']}.quicksight.aws.amazon.com/")
