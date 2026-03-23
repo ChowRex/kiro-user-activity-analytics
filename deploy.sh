@@ -6,7 +6,7 @@ FROM_STEP=1
 while [[ $# -gt 0 ]]; do
     case $1 in
         --from-step) FROM_STEP=$2; shift 2;;
-        *) echo "用法: $0 [--from-step N]  (N=1~6)"; exit 1;;
+        *) echo "用法: $0 [--from-step N]  (N=1~7)"; exit 1;;
     esac
 done
 
@@ -79,6 +79,30 @@ aws cloudformation deploy \
     --no-fail-on-empty-changeset
 
 echo "✓ CloudFormation 部署完成"
+
+# 强制更新 Lambda 代码（CloudFormation 不检测 inline code 变更）
+echo "  更新 Lambda 函数代码..."
+python3 -c "
+import yaml
+
+# 添加 CloudFormation 标签支持
+class CFLoader(yaml.SafeLoader): pass
+for tag in ['!Ref','!Sub','!GetAtt','!Join','!Select','!Split','!If','!Equals','!Not','!And','!Or']:
+    CFLoader.add_constructor(tag, lambda l,n: l.construct_scalar(n) if n.id=='scalar' else l.construct_sequence(n))
+cf = yaml.load(open('infrastructure/cloudformation.yaml'), Loader=CFLoader)
+code = cf['Resources']['UserMappingFunction']['Properties']['Code']['ZipFile']
+with open('/tmp/index.py', 'w') as f:
+    f.write(code)
+"
+cd /tmp && zip -q lambda_package.zip index.py
+aws lambda update-function-code \
+    --function-name kiro-user-mapping-sync \
+    --zip-file fileb:///tmp/lambda_package.zip \
+    --region $REGION > /dev/null
+cd - > /dev/null
+rm -f /tmp/index.py /tmp/lambda_package.zip
+echo "  ✓ Lambda 代码已更新"
+
 echo ""
 fi # step 1
 
@@ -466,11 +490,13 @@ if [ "$FROM_STEP" -le 6 ]; then
 echo "6️⃣  部署 QuickSight 数据源和数据集 (SPICE 模式)..."
 python3 scripts/create_datasets.py
 echo ""
+fi # step 6
 
+if [ "$FROM_STEP" -le 7 ]; then
 echo "7️⃣  发布 QuickSight Dashboard..."
 python3 scripts/create_dashboard.py
 echo ""
-fi # step 6
+fi # step 7
 
 # ============================================
 # 完成

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-23
+
+### Changed
+- **用户概况 Sheet 改进**：
+  - 视图 `user_summary` 改为只查询当前自然月数据（不再包含历史月份）
+  - KPI 改为"总用户数"和"活跃用户数"（通过 `is_active` 字段 SUM 实现）
+  - 柱状图改为按用户分组降序排列（不再按月分色），一眼可见消耗/活跃排名
+  - 明细表增加容量（capacity）、使用率（usage_pct）、活跃度（activity_level）字段
+- **活跃度按订阅容量比例计算**：PRO=1000, PRO_PLUS=2000, POWER=10000，根据 usage_pct 划分 6 个等级
+- **用户映射同步**：`sync_user_mapping.py` 和 Lambda 改为拉取 Identity Center 全部用户（57 人），不再仅拉取有使用记录的用户
+
 ## [1.2.0] - 2026-03-23
 
 ### Added
