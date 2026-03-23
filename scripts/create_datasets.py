@@ -377,6 +377,8 @@ class QuickSightDeployer:
                             {'Name': 'first_seen', 'Type': 'STRING'},
                             {'Name': 'last_seen', 'Type': 'STRING'},
                             {'Name': 'active_days', 'Type': 'INTEGER'},
+                            {'Name': 'capacity', 'Type': 'INTEGER'},
+                            {'Name': 'usage_pct', 'Type': 'DECIMAL'},
                             {'Name': 'activity_level', 'Type': 'STRING'},
                         ]
                     }

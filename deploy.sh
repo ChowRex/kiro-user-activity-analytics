@@ -389,6 +389,11 @@ WITH monthly_data AS (
     m.username,
     date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') as month,
     array_join(array_sort(array_agg(DISTINCT r.subscription_tier)), ' → ') as tier_history,
+    MAX(CASE 
+      WHEN r.subscription_tier = 'POWER' THEN 10000
+      WHEN r.subscription_tier = 'PRO_PLUS' THEN 2000
+      ELSE 1000
+    END) as capacity,
     array_join(array_sort(array_agg(DISTINCT r.client_type)), ' / ') as client_types,
     SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
     SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
@@ -411,12 +416,14 @@ current_month AS (
 SELECT d.username, d.month, d.tier_history, d.client_types,
   d.total_credits, d.total_overage, d.total_messages, d.total_conversations,
   d.first_seen, d.last_seen, d.active_days,
+  d.capacity,
+  ROUND(d.total_credits * 100.0 / d.capacity, 1) as usage_pct,
   CASE
     WHEN d.tier_history LIKE '%→%' THEN '🔶 升级用户'
-    WHEN d.total_credits >= 800 THEN '🟣 超高活跃'
-    WHEN d.total_credits >= 500 THEN '🟢 高活跃'
-    WHEN d.total_credits >= 100 THEN '🔵 一般活跃'
-    WHEN d.total_credits >= 50 THEN '🟠 稍低活跃'
+    WHEN d.total_credits * 100.0 / d.capacity >= 80 THEN '🟣 超高活跃'
+    WHEN d.total_credits * 100.0 / d.capacity >= 50 THEN '🟢 高活跃'
+    WHEN d.total_credits * 100.0 / d.capacity >= 10 THEN '🔵 一般活跃'
+    WHEN d.total_credits * 100.0 / d.capacity >= 5 THEN '🟠 稍低活跃'
     WHEN d.total_credits > 0 THEN '🟡 低活跃'
     ELSE '🔴 不活跃'
   END as activity_level
@@ -425,6 +432,7 @@ UNION ALL
 SELECT u.username, cm.month, '-' as tier_history, '-' as client_types,
   0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
   NULL as first_seen, NULL as last_seen, 0 as active_days,
+  0 as capacity, 0.0 as usage_pct,
   '🔴 不活跃' as activity_level
 FROM all_users u
 CROSS JOIN current_month cm

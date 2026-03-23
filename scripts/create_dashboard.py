@@ -220,7 +220,7 @@ definition = {
             'Name': '用户概况',
             'Visuals': [
                 kpi('d-kpi-total-users', '总用户数', SM, 'username', 'DISTINCT_COUNT'),
-                kpi('d-kpi-total-days', '总活跃天数', SM, 'active_days', 'SUM'),
+                kpi('d-kpi-total-credits', '总 Credit 消耗', SM, 'total_credits', 'SUM'),
                 # 每月用户 Credit 消耗柱状图（按用户分色）
                 {'BarChartVisual': {
                     'VisualId': 'd-bar-monthly-credits',
@@ -236,7 +236,11 @@ definition = {
                         'Colors': [{'CategoricalDimensionField': {
                             'FieldId': 'sm_user', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}
                         }}]
-                    }}, 'Orientation': 'HORIZONTAL'}
+                    }},
+                    'Orientation': 'HORIZONTAL',
+                    'SortConfiguration': {'CategorySort': [
+                        {'FieldSort': {'FieldId': 'sm_credits', 'Direction': 'DESC'}}
+                    ], 'ColorItemsLimit': {'ItemsLimit': 57, 'OtherCategories': 'EXCLUDE'}}}
                 }},
                 # 每月活跃天数柱状图（按用户分色）
                 {'BarChartVisual': {
@@ -253,7 +257,11 @@ definition = {
                         'Colors': [{'CategoricalDimensionField': {
                             'FieldId': 'sd_user', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}
                         }}]
-                    }}, 'Orientation': 'HORIZONTAL'}
+                    }},
+                    'Orientation': 'HORIZONTAL',
+                    'SortConfiguration': {'CategorySort': [
+                        {'FieldSort': {'FieldId': 'sd_days', 'Direction': 'DESC'}}
+                    ], 'ColorItemsLimit': {'ItemsLimit': 57, 'OtherCategories': 'EXCLUDE'}}}
                 }},
                 # 用户月度明细表
                 {'TableVisual': {
@@ -270,6 +278,7 @@ definition = {
                             ],
                             'Values': [
                                 {'NumericalMeasureField': {'FieldId': 's_credits', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_credits'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
+                                {'NumericalMeasureField': {'FieldId': 's_pct', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'usage_pct'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'MAX'}}},
                                 {'NumericalMeasureField': {'FieldId': 's_msgs', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_messages'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
                                 {'NumericalMeasureField': {'FieldId': 's_days', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'active_days'}, 'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}}},
                             ]
