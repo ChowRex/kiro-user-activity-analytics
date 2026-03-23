@@ -175,7 +175,8 @@ Resources:
           def get_name(uid):
               try:
                   u = ids.describe_user(IdentityStoreId=ID_STORE, UserId=uid)
-                  return u.get('DisplayName','') or u.get('UserName','') or uid
+                  name = u.get('DisplayName','') or u.get('UserName','') or uid
+                  return name.replace('\r', '').replace('\n', '').strip()
               except: return uid
 
           def ensure_table():
@@ -222,8 +223,8 @@ Resources:
                       name = get_name(clean)
                       mapping.append((clean, name))  # 纯 UUID
                       mapping.append((f'{ID_STORE}.{clean}', name))  # 带前缀
-              buf = io.StringIO()
-              w = csv.writer(buf)
+              buf = io.StringIO(newline='')
+              w = csv.writer(buf, lineterminator='\n')
               w.writerow(['userid','username'])
               for uid, name in mapping: w.writerow([uid, name])
               s3.put_object(Bucket=BUCKET, Key=MAPPING_KEY, Body=buf.getvalue().encode('utf-8'), ContentType='text/csv')

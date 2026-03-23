@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-03-23
+
+### Fixed
+- **Lambda 用户名映射再次出现 null**：修复 Lambda 函数两个遗漏的 bug
+  - `get_name()` 缺少 `\r` 清理：Identity Center API 返回的 DisplayName 包含 `\r`，导致 CSV 中用户名带不可见字符，OpenCSVSerde 解析后 LEFT JOIN 匹配失败
+  - `csv.writer` 未指定 `lineterminator='\n'`：默认使用 `\r\n`，进一步导致解析异常
+  - 根本原因：上次部署时本地脚本（已修复）生成了干净的映射文件，但 Lambda 每天自动运行时用未修复的代码覆盖了好的文件
+  - 影响文件：`infrastructure/cloudformation.yaml`
+
 ## [1.1.0] - 2026-03-13
 
 ### Fixed
