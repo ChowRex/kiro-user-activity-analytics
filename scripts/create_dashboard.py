@@ -221,48 +221,12 @@ definition = {
             'Visuals': [
                 kpi('d-kpi-total-users', '总用户数', SM, 'username', 'DISTINCT_COUNT'),
                 kpi('d-kpi-active-users', '活跃用户数', SM, 'is_active', 'SUM'),
-                # 每月用户 Credit 消耗柱状图（按用户分色）
-                {'BarChartVisual': {
-                    'VisualId': 'd-bar-monthly-credits',
-                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '每月用户 Credit 消耗'}},
-                    'ChartConfiguration': {'FieldWells': {'BarChartAggregatedFieldWells': {
-                        'Category': [{'CategoricalDimensionField': {
-                            'FieldId': 'sm_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}
-                        }}],
-                        'Values': [{'NumericalMeasureField': {
-                            'FieldId': 'sm_credits', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'total_credits'},
-                            'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}
-                        }}],
-                        'Colors': [{'CategoricalDimensionField': {
-                            'FieldId': 'sm_user', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}
-                        }}]
-                    }},
-                    'Orientation': 'HORIZONTAL',
-                    'SortConfiguration': {'CategorySort': [
-                        {'FieldSort': {'FieldId': 'sm_credits', 'Direction': 'DESC'}}
-                    ], 'ColorItemsLimit': {'ItemsLimit': 57, 'OtherCategories': 'EXCLUDE'}}}
-                }},
-                # 每月活跃天数柱状图（按用户分色）
-                {'BarChartVisual': {
-                    'VisualId': 'd-bar-monthly-days',
-                    'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': '每月用户活跃天数'}},
-                    'ChartConfiguration': {'FieldWells': {'BarChartAggregatedFieldWells': {
-                        'Category': [{'CategoricalDimensionField': {
-                            'FieldId': 'sd_month', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'month'}
-                        }}],
-                        'Values': [{'NumericalMeasureField': {
-                            'FieldId': 'sd_days', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'active_days'},
-                            'AggregationFunction': {'SimpleNumericalAggregation': 'SUM'}
-                        }}],
-                        'Colors': [{'CategoricalDimensionField': {
-                            'FieldId': 'sd_user', 'Column': {'DataSetIdentifier': SM, 'ColumnName': 'username'}
-                        }}]
-                    }},
-                    'Orientation': 'HORIZONTAL',
-                    'SortConfiguration': {'CategorySort': [
-                        {'FieldSort': {'FieldId': 'sd_days', 'Direction': 'DESC'}}
-                    ], 'ColorItemsLimit': {'ItemsLimit': 57, 'OtherCategories': 'EXCLUDE'}}}
-                }},
+                # 每月用户 Credit 消耗柱状图
+                bar('d-bar-monthly-credits', '每月用户 Credit 消耗', SM, 'username',
+                    [('sm_credits', 'total_credits', 'SUM')], limit=57),
+                # 每月用户活跃天数柱状图
+                bar('d-bar-monthly-days', '每月用户活跃天数', SM, 'username',
+                    [('sd_days', 'active_days', 'SUM')], limit=57),
                 # 用户月度明细表
                 {'TableVisual': {
                     'VisualId': 'd-table-user-summary',
