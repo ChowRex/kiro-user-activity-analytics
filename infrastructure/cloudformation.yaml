@@ -198,10 +198,10 @@ Resources:
 
           def handler(event, context):
               print(f'Starting sync: DB={GLUE_DB}, IDStore={ID_STORE}')
+              # 从 Athena 获取有使用记录的 userid
               raw_ids = set()
               for t in ['by_user_analytic','user_report']:
                   try:
-                      # 使用 CASE 语句提取纯 UUID
                       query = f"""
                           SELECT DISTINCT 
                               CASE 
@@ -215,22 +215,37 @@ Resources:
                       for row in rows:
                           if row[0]: raw_ids.add(row[0])
                   except Exception as e: print(f'Skip {t}: {e}')
+              # 从 IIC 获取全部用户
               mapping = []
+              iic_ids = set()
+              paginator_token = None
+              while True:
+                  kwargs = {'IdentityStoreId': ID_STORE}
+                  if paginator_token: kwargs['NextToken'] = paginator_token
+                  resp = ids.list_users(**kwargs)
+                  for u in resp.get('Users', []):
+                      uid = u['UserId']
+                      name = u.get('DisplayName','') or u.get('UserName','') or uid
+                      name = name.replace('\r','').replace('\n','').strip()
+                      iic_ids.add(uid)
+                      mapping.append((uid, name))
+                      mapping.append((f'{ID_STORE}.{uid}', name))
+                  paginator_token = resp.get('NextToken')
+                  if not paginator_token: break
+              # 补充 Athena 中存在但 IIC 中不存在的 userid
               for raw in sorted(raw_ids):
                   clean = raw.strip('"').strip()
-                  if clean:
-                      # 生成两种格式的映射
-                      name = get_name(clean)
-                      mapping.append((clean, name))  # 纯 UUID
-                      mapping.append((f'{ID_STORE}.{clean}', name))  # 带前缀
+                  if clean and clean not in iic_ids:
+                      mapping.append((clean, get_name(clean)))
+                      mapping.append((f'{ID_STORE}.{clean}', get_name(clean)))
               buf = io.StringIO(newline='')
               w = csv.writer(buf, lineterminator='\n')
               w.writerow(['userid','username'])
               for uid, name in mapping: w.writerow([uid, name])
               s3.put_object(Bucket=BUCKET, Key=MAPPING_KEY, Body=buf.getvalue().encode('utf-8'), ContentType='text/csv')
               ensure_table()
-              print(f'Sync complete: {len(mapping)} mappings ({len(raw_ids)} users x 2 formats)')
-              return {'users': len(raw_ids), 'mappings': len(mapping)}
+              print(f'Sync complete: {len(mapping)} mappings (IIC:{len(iic_ids)} + Athena:{len(raw_ids)})')
+              return {'iic_users': len(iic_ids), 'athena_users': len(raw_ids), 'mappings': len(mapping)}
 
   # EventBridge 定时触发 - 每天 UTC 3:00
   UserMappingScheduleRule:

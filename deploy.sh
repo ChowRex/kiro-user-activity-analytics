@@ -6,7 +6,7 @@ FROM_STEP=1
 while [[ $# -gt 0 ]]; do
     case $1 in
         --from-step) FROM_STEP=$2; shift 2;;
-        *) echo "用法: $0 [--from-step N]  (N=1~6)"; exit 1;;
+        *) echo "用法: $0 [--from-step N]  (N=1~7)"; exit 1;;
     esac
 done
 
@@ -79,6 +79,30 @@ aws cloudformation deploy \
     --no-fail-on-empty-changeset
 
 echo "✓ CloudFormation 部署完成"
+
+# 强制更新 Lambda 代码（CloudFormation 不检测 inline code 变更）
+echo "  更新 Lambda 函数代码..."
+python3 -c "
+import yaml
+
+# 添加 CloudFormation 标签支持
+class CFLoader(yaml.SafeLoader): pass
+for tag in ['!Ref','!Sub','!GetAtt','!Join','!Select','!Split','!If','!Equals','!Not','!And','!Or']:
+    CFLoader.add_constructor(tag, lambda l,n: l.construct_scalar(n) if n.id=='scalar' else l.construct_sequence(n))
+cf = yaml.load(open('infrastructure/cloudformation.yaml'), Loader=CFLoader)
+code = cf['Resources']['UserMappingFunction']['Properties']['Code']['ZipFile']
+with open('/tmp/index.py', 'w') as f:
+    f.write(code)
+"
+cd /tmp && zip -q lambda_package.zip index.py
+aws lambda update-function-code \
+    --function-name kiro-user-mapping-sync \
+    --zip-file fileb:///tmp/lambda_package.zip \
+    --region $REGION > /dev/null
+cd - > /dev/null
+rm -f /tmp/index.py /tmp/lambda_package.zip
+echo "  ✓ Lambda 代码已更新"
+
 echo ""
 fi # step 1
 
@@ -377,17 +401,138 @@ echo ""
 fi # step 5
 
 # ============================================
+# 5.5 创建 Athena 视图（用户月度概况）
+# ============================================
+if [ "$FROM_STEP" -le 5 ]; then
+echo "  创建 Athena 视图 user_summary..."
+aws athena start-query-execution \
+    --query-string "
+CREATE OR REPLACE VIEW ${GLUE_DB}.user_summary AS
+WITH current_month AS (
+  SELECT date_format(current_date, '%Y-%m') as month
+),
+monthly_data AS (
+  SELECT 
+    m.username,
+    array_join(array_sort(array_agg(DISTINCT r.subscription_tier)), ' → ') as tier_history,
+    MAX(CASE 
+      WHEN r.subscription_tier = 'POWER' THEN 10000
+      WHEN r.subscription_tier = 'PRO_PLUS' THEN 2000
+      ELSE 1000
+    END) as capacity,
+    array_join(array_sort(array_agg(DISTINCT r.client_type)), ' / ') as client_types,
+    SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
+    SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
+    SUM(CAST(r.total_messages AS INTEGER)) as total_messages,
+    SUM(CAST(r.chat_conversations AS INTEGER)) as total_conversations,
+    MIN(r.date) as first_seen,
+    MAX(r.date) as last_seen,
+    COUNT(DISTINCT r.date) as active_days
+  FROM ${GLUE_DB}.user_report r
+  LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
+  WHERE date_format(date_parse(r.date, '%Y-%m-%d'), '%Y-%m') = (SELECT month FROM current_month)
+  GROUP BY m.username
+),
+all_users AS (
+  SELECT DISTINCT username FROM ${GLUE_DB}.user_mapping WHERE userid NOT LIKE 'd-%'
+),
+combined AS (
+  SELECT d.username, (SELECT month FROM current_month) as month, d.tier_history, d.client_types,
+    d.total_credits, d.total_overage, d.total_messages, d.total_conversations,
+    d.first_seen, d.last_seen, d.active_days,
+    d.capacity,
+    ROUND(d.total_credits * 100.0 / d.capacity, 1) as usage_pct,
+    1 as is_active,
+    CASE
+      WHEN d.tier_history LIKE '%→%' THEN '🔶 升级用户'
+      WHEN d.total_credits * 100.0 / d.capacity >= 80 THEN '🟣 超高活跃'
+      WHEN d.total_credits * 100.0 / d.capacity >= 50 THEN '🟢 高活跃'
+      WHEN d.total_credits * 100.0 / d.capacity >= 10 THEN '🔵 一般活跃'
+      WHEN d.total_credits * 100.0 / d.capacity >= 5 THEN '🟠 稍低活跃'
+      WHEN d.total_credits > 0 THEN '🟡 低活跃'
+      ELSE '🔴 不活跃'
+    END as activity_level
+  FROM monthly_data d
+  UNION ALL
+  SELECT u.username, (SELECT month FROM current_month) as month, '-' as tier_history, '-' as client_types,
+    0.00 as total_credits, 0.00 as total_overage, 0 as total_messages, 0 as total_conversations,
+    NULL as first_seen, NULL as last_seen, 0 as active_days,
+    0 as capacity, 0.0 as usage_pct,
+    0 as is_active,
+    '🔴 不活跃' as activity_level
+  FROM all_users u
+  WHERE u.username NOT IN (SELECT username FROM monthly_data)
+)
+SELECT CAST(ROW_NUMBER() OVER (ORDER BY is_active DESC, total_credits DESC) AS INTEGER) as row_num,
+  username, month, tier_history, client_types,
+  total_credits, total_overage, total_messages, total_conversations,
+  first_seen, last_seen, active_days, capacity, usage_pct, is_active, activity_level
+FROM combined
+" \
+    --work-group $WORKGROUP \
+    --region $REGION \
+    --output text > /dev/null
+sleep 5
+
+# 授权 user_summary 和 credit_summary 视图
+echo "  创建 Athena 视图 credit_summary..."
+aws athena start-query-execution \
+    --query-string "
+CREATE OR REPLACE VIEW ${GLUE_DB}.credit_summary AS
+WITH base AS (
+  SELECT
+    m.username,
+    r.subscription_tier,
+    r.client_type,
+    SUM(CAST(r.credits_used AS DECIMAL(10,2))) as total_credits,
+    SUM(CAST(r.overage_credits_used AS DECIMAL(10,2))) as total_overage,
+    MAX(CAST(r.overage_cap AS DECIMAL(10,2))) as overage_cap,
+    SUM(CAST(r.total_messages AS INTEGER)) as total_messages
+  FROM ${GLUE_DB}.user_report r
+  LEFT JOIN ${GLUE_DB}.user_mapping m ON r.userid = m.userid
+  WHERE r.date > '2026-02-10'
+  GROUP BY m.username, r.subscription_tier, r.client_type
+)
+SELECT CAST(ROW_NUMBER() OVER (ORDER BY total_credits DESC) AS INTEGER) as row_num,
+  username, subscription_tier, client_type, total_credits, total_overage, overage_cap, total_messages
+FROM base
+" \
+    --work-group $WORKGROUP \
+    --region $REGION \
+    --output text > /dev/null
+sleep 5
+
+for VIEW_NAME in user_summary credit_summary; do
+for PRINCIPAL_PAIR in \
+    "$(aws sts get-caller-identity --query 'Arn' --output text)|SELECT DESCRIBE" \
+    "$QS_ROLE_ARN|SELECT DESCRIBE" \
+    "IAM_ALLOWED_PRINCIPALS|SELECT DESCRIBE"; do
+    IFS='|' read -r P PERMS <<< "$PRINCIPAL_PAIR"
+    aws lakeformation grant-permissions \
+        --principal "DataLakePrincipalIdentifier=$P" \
+        --resource "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"$VIEW_NAME\"}}" \
+        --permissions $PERMS \
+        --region $REGION 2>/dev/null || true
+done
+done
+echo "  ✓ user_summary / credit_summary 视图创建完成"
+echo ""
+fi # step 5.5
+
+# ============================================
 # 6. 部署 QuickSight 数据源、数据集和 Dashboard
 # ============================================
 if [ "$FROM_STEP" -le 6 ]; then
 echo "6️⃣  部署 QuickSight 数据源和数据集 (SPICE 模式)..."
 python3 scripts/create_datasets.py
 echo ""
+fi # step 6
 
+if [ "$FROM_STEP" -le 7 ]; then
 echo "7️⃣  发布 QuickSight Dashboard..."
 python3 scripts/create_dashboard.py
 echo ""
-fi # step 6
+fi # step 7
 
 # ============================================
 # 完成

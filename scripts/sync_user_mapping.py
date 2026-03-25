@@ -85,20 +85,41 @@ for table in ['by_user_analytic', 'user_report']:
 print(f"  找到 {len(raw_userids)} 个不重复用户")
 
 # ============================================
-# 2. 逐个查询 Identity Center 获取用户名
+# 2. 从 Identity Center 获取所有用户，合并 Athena userid
 # ============================================
-print("2. 从 Identity Center 获取用户名...")
+print("2. 从 Identity Center 获取所有用户...")
 mapping = []
+iic_userids = set()
+
+# 拉取 IIC 全部用户
+paginator_token = None
+while True:
+    kwargs = {'IdentityStoreId': identity_store_id}
+    if paginator_token:
+        kwargs['NextToken'] = paginator_token
+    resp = ids.list_users(**kwargs)
+    for user in resp.get('Users', []):
+        uid = user['UserId']
+        name = user.get('DisplayName', '') or user.get('UserName', '') or uid
+        name = name.replace('\r', '').replace('\n', '').strip()
+        iic_userids.add(uid)
+        mapping.append((uid, name))
+        mapping.append((f'{identity_store_id}.{uid}', name))
+        print(f"  {uid} → {name}")
+    paginator_token = resp.get('NextToken')
+    if not paginator_token:
+        break
+
+# 补充 Athena 中存在但 IIC 中不存在的 userid（如已删除的用户）
 for raw_uid in sorted(raw_userids):
-    # 去掉 CSV serde 可能保留的引号
     clean_uid = raw_uid.strip('"').strip()
-    if not clean_uid:
-        continue
-    name = get_display_name(clean_uid)
-    # 生成两种格式的映射：纯 UUID 和带前缀
-    mapping.append((clean_uid, name))  # 纯 UUID
-    mapping.append((f'{identity_store_id}.{clean_uid}', name))  # 带前缀
-    print(f"  {clean_uid} → {name}")
+    if clean_uid and clean_uid not in iic_userids:
+        name = get_display_name(clean_uid)
+        mapping.append((clean_uid, name))
+        mapping.append((f'{identity_store_id}.{clean_uid}', name))
+        print(f"  {clean_uid} → {name} (仅在 Athena 中)")
+
+print(f"  IIC 用户: {len(iic_userids)}, Athena 用户: {len(raw_userids)}, 映射记录: {len(mapping)}")
 
 # ============================================
 # 3. 生成 CSV 并上传到 S3（使用 Unix 换行符）
