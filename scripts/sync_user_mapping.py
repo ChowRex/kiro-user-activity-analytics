@@ -2,6 +2,10 @@
 """
 从 Athena 查出所有 userid，通过 IAM Identity Center 获取用户名，
 生成映射 CSV 上传到 S3，并创建/更新 Athena 外部表。
+
+NOTE: 此脚本用于本地/手动执行。CloudFormation 中的 Lambda inline code
+(infrastructure/cloudformation.yaml → UserMappingFunction) 包含相同逻辑。
+修改时请同步更新两处。
 """
 import boto3
 import yaml
@@ -14,7 +18,7 @@ region = config['aws']['region']
 account_id = config['aws']['account_id']
 bucket = config['s3']['bucket_name']
 glue_db = config['glue']['database_name']
-identity_store_id = config.get('identity_center', {}).get('identity_store_id', 'd-906791923a')
+identity_store_id = config['identity_center']['identity_store_id']
 
 athena = boto3.client('athena', region_name=region)
 s3 = boto3.client('s3', region_name=region)

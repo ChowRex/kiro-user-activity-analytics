@@ -25,3 +25,10 @@ quicksight:
     # 获取方式: aws quicksight list-users --aws-account-id YOUR_ACCOUNT_ID --namespace default
   data_source_name: "KiroUserActivity"
   dataset_name: "KiroUserActivityDataset"
+  dashboard_id: "kiro-comprehensive-dashboard"
+
+# Dashboard 报告配置
+report:
+  email: "your-email@example.com"        # 报告接收邮箱（需通过 SES 验证）
+  schedule: "cron(0 5 * * ? *)"          # 每天 UTC 05:00 (北京 13:00)，在 SPICE 刷新后
+  bucket: "your-report-bucket"           # 报告输出桶（建议与数据桶分开，避免公开策略影响原始数据）

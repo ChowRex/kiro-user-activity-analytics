@@ -6,7 +6,7 @@ FROM_STEP=1
 while [[ $# -gt 0 ]]; do
     case $1 in
         --from-step) FROM_STEP=$2; shift 2;;
-        *) echo "用法: $0 [--from-step N]  (N=1~7)"; exit 1;;
+        *) echo "用法: $0 [--from-step N]  (N=1~8)"; exit 1;;
     esac
 done
 
@@ -38,6 +38,10 @@ WORKGROUP="kiro-analytics-workgroup"
 GLUE_DB="kiro_analytics"
 QS_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/service-role/aws-quicksight-service-role-v0"
 QS_USER_ARN=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['quicksight']['user_arn'])")
+DASHBOARD_ID=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['quicksight'].get('dashboard_id','kiro-comprehensive-dashboard'))")
+REPORT_EMAIL=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('report',{}).get('email',''))")
+REPORT_SCHEDULE=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('report',{}).get('schedule','cron(0 5 * * ? *)'))")
+REPORT_BUCKET=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['report']['bucket'])")
 AWS_PROFILE=${AWS_PROFILE:-default}
 
 echo "📋 配置信息:"
@@ -74,6 +78,10 @@ aws cloudformation deploy \
         S3BucketName=$BUCKET \
         S3Prefix=$PREFIX \
         IdentityStoreId=$IDENTITY_STORE_ID \
+        DashboardId=$DASHBOARD_ID \
+        ReportEmail=$REPORT_EMAIL \
+        ReportSchedule="$REPORT_SCHEDULE" \
+        ReportBucket=$REPORT_BUCKET \
     --capabilities CAPABILITY_IAM \
     --region $REGION \
     --no-fail-on-empty-changeset
@@ -533,6 +541,58 @@ echo "7️⃣  发布 QuickSight Dashboard..."
 python3 scripts/create_dashboard.py
 echo ""
 fi # step 7
+
+# ============================================
+# 8. 配置 Dashboard 报告 (SES 验证 + S3 静态网站)
+# ============================================
+if [ "$FROM_STEP" -le 8 ]; then
+echo "8️⃣  配置 Dashboard 快照报告..."
+
+# 验证 SES 发件人邮箱
+if [ -n "$REPORT_EMAIL" ]; then
+    SES_VERIFIED=$(aws sesv2 get-email-identity --email-identity "$REPORT_EMAIL" \
+        --region $REGION --query 'VerifiedForSendingStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+    if [ "$SES_VERIFIED" != "True" ]; then
+        echo "  发送 SES 验证邮件到 $REPORT_EMAIL ..."
+        aws sesv2 create-email-identity --email-identity "$REPORT_EMAIL" --region $REGION 2>/dev/null || true
+        echo "  ⚠️  请检查邮箱并点击验证链接！"
+    else
+        echo "  ✓ SES 邮箱已验证: $REPORT_EMAIL"
+    fi
+fi
+
+# 启用 S3 静态网站托管
+aws s3api put-bucket-website \
+    --bucket $REPORT_BUCKET \
+    --website-configuration '{"IndexDocument":{"Suffix":"index.html"},"ErrorDocument":{"Key":"error.html"}}' \
+    --region $REGION 2>/dev/null
+echo "  ✓ S3 静态网站已启用"
+
+# 更新 Dashboard Report Lambda 代码
+echo "  更新 Dashboard Report Lambda 代码..."
+python3 -c "
+import yaml
+class CFLoader(yaml.SafeLoader): pass
+for tag in ['!Ref','!Sub','!GetAtt','!Join','!Select','!Split','!If','!Equals','!Not','!And','!Or']:
+    CFLoader.add_constructor(tag, lambda l,n: l.construct_scalar(n) if n.id=='scalar' else l.construct_sequence(n))
+cf = yaml.load(open('infrastructure/cloudformation.yaml'), Loader=CFLoader)
+code = cf['Resources']['DashboardReportFunction']['Properties']['Code']['ZipFile']
+with open('/tmp/index.py', 'w') as f:
+    f.write(code)
+"
+cd /tmp && zip -q report_lambda.zip index.py
+aws lambda update-function-code \
+    --function-name kiro-dashboard-report \
+    --zip-file fileb:///tmp/report_lambda.zip \
+    --region $REGION > /dev/null 2>&1 || echo "  (Lambda 将在 CF 部署时创建)"
+cd - > /dev/null
+rm -f /tmp/index.py /tmp/report_lambda.zip
+echo "  ✓ Dashboard Report Lambda 代码已更新"
+
+REPORT_URL="http://${REPORT_BUCKET}.s3-website-${REGION}.amazonaws.com/dashboard-reports/public/index.html"
+echo "  ✓ 报告访问地址: $REPORT_URL"
+echo ""
+fi # step 8
 
 # ============================================
 # 完成
