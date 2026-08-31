@@ -42,9 +42,37 @@ DASHBOARD_ID=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); p
 REPORT_EMAIL=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('report',{}).get('email',''))")
 REPORT_SCHEDULE=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('report',{}).get('schedule','cron(0 5 * * ? *)'))")
 REPORT_BUCKET=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['report']['bucket'])")
+MONTHLY_KIRO_APPLICATION_ARN=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('kiro_application_arn',''))")
+MONTHLY_SUBSCRIPTION_CSV_KEY=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('subscription_csv_key',''))")
+MONTHLY_FEISHU_DEV_SECRET_ARN=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('feishu_dev_secret_arn',''))")
+MONTHLY_FEISHU_PROD_SECRET_ARN=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('feishu_prod_secret_arn',''))")
+MONTHLY_FINAL_NOTIFICATION_ENABLED=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(str(c.get('monthly_report',{}).get('final_notification_enabled',True)).lower())")
+MONTHLY_FINAL_NOTIFICATION_CHANNEL=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('final_notification_channel','dev'))")
+MONTHLY_OUTPUT_PREFIX=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('output_prefix','dashboard-reports/public/kiro-monthly'))")
+MONTHLY_PROVISIONAL_SCHEDULE=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('provisional_schedule','cron(0 6 1 * ? *)'))")
+MONTHLY_FINAL_SCHEDULE=$(python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c.get('monthly_report',{}).get('final_schedule','cron(0 6 2 * ? *)'))")
 AWS_PROFILE=${AWS_PROFILE:-default}
+export AWS_PROFILE
 
 echo "📋 配置信息:"
+if [ -z "$MONTHLY_SUBSCRIPTION_CSV_KEY" ] && [ -z "$MONTHLY_KIRO_APPLICATION_ARN" ]; then
+    echo "❌ monthly_report 必须配置 subscription_csv_key 或 kiro_application_arn"
+    exit 1
+fi
+case "$MONTHLY_FINAL_NOTIFICATION_ENABLED" in true|false) ;; *)
+    echo "❌ final_notification_enabled 必须为 true 或 false"; exit 1 ;;
+esac
+case "$MONTHLY_FINAL_NOTIFICATION_CHANNEL" in dev|prod|both) ;; *)
+    echo "❌ final_notification_channel 必须为 dev、prod 或 both"; exit 1 ;;
+esac
+if [ "$MONTHLY_FINAL_NOTIFICATION_ENABLED" = "true" ]; then
+    if { [ "$MONTHLY_FINAL_NOTIFICATION_CHANNEL" = "dev" ] || [ "$MONTHLY_FINAL_NOTIFICATION_CHANNEL" = "both" ]; } && [ -z "$MONTHLY_FEISHU_DEV_SECRET_ARN" ]; then
+        echo "❌ 已启用开发通道通知，但 feishu_dev_secret_arn 未配置"; exit 1
+    fi
+    if { [ "$MONTHLY_FINAL_NOTIFICATION_CHANNEL" = "prod" ] || [ "$MONTHLY_FINAL_NOTIFICATION_CHANNEL" = "both" ]; } && [ -z "$MONTHLY_FEISHU_PROD_SECRET_ARN" ]; then
+        echo "❌ 已启用生产通道通知，但 feishu_prod_secret_arn 未配置（不会回退开发通道）"; exit 1
+    fi
+fi
 echo "  Region:    $REGION"
 echo "  Account:   $ACCOUNT_ID"
 echo "  S3 Bucket: $BUCKET"
@@ -57,6 +85,32 @@ echo ""
 # ============================================
 if [ "$FROM_STEP" -le 1 ]; then
 echo "1️⃣  部署基础设施 (CloudFormation)..."
+
+# Build the monthly Lambda as an immutable artifact before CloudFormation deploy.
+MONTHLY_BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kiro-monthly.XXXXXX")
+MONTHLY_ZIP_PATH="${MONTHLY_BUILD_DIR}.zip"
+cleanup_monthly_build() { rm -rf "$MONTHLY_BUILD_DIR" "$MONTHLY_ZIP_PATH"; }
+trap cleanup_monthly_build EXIT
+python3 -m pip install --disable-pip-version-check --no-compile \
+    --requirement lambda/monthly_report/requirements.txt \
+    --target "$MONTHLY_BUILD_DIR" >/dev/null
+cp lambda/monthly_report/index.py "$MONTHLY_BUILD_DIR/index.py"
+PYTHONPATH="$MONTHLY_BUILD_DIR" python3 -c "import index; assert callable(index.handler); print('  ✓ monthly package smoke import')"
+(
+    cd "$MONTHLY_BUILD_DIR"
+    find . -type f -name '*.pyc' -delete
+    find . -type f -print | LC_ALL=C sort | zip -q -X "$MONTHLY_ZIP_PATH" -@
+)
+if command -v shasum >/dev/null 2>&1; then
+    MONTHLY_ARTIFACT_HASH=$(shasum -a 256 "$MONTHLY_ZIP_PATH" | awk '{print $1}')
+else
+    MONTHLY_ARTIFACT_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$MONTHLY_ZIP_PATH','rb').read()).hexdigest())")
+fi
+MONTHLY_ARTIFACT_KEY="artifacts/monthly-report/${MONTHLY_ARTIFACT_HASH}.zip"
+aws s3api put-object --bucket "$BUCKET" --key "$MONTHLY_ARTIFACT_KEY" \
+    --body "$MONTHLY_ZIP_PATH" --server-side-encryption AES256 \
+    --content-type application/zip --region "$REGION" >/dev/null
+echo "  ✓ monthly artifact uploaded: s3://${BUCKET}/${MONTHLY_ARTIFACT_KEY}"
 
 # 检查 stack 是否处于 ROLLBACK_COMPLETE 等不可更新状态，自动清理
 STACK_STATUS=$(aws cloudformation describe-stacks \
@@ -76,12 +130,22 @@ aws cloudformation deploy \
     --stack-name $STACK_NAME \
     --parameter-overrides \
         S3BucketName=$BUCKET \
-        S3Prefix=$PREFIX \
         IdentityStoreId=$IDENTITY_STORE_ID \
         DashboardId=$DASHBOARD_ID \
         ReportEmail=$REPORT_EMAIL \
         ReportSchedule="$REPORT_SCHEDULE" \
-        ReportBucket=$REPORT_BUCKET \
+        ReportBucket="$REPORT_BUCKET" \
+        MonthlyArtifactBucket="$BUCKET" \
+        MonthlyArtifactKey="$MONTHLY_ARTIFACT_KEY" \
+        KiroApplicationArn="$MONTHLY_KIRO_APPLICATION_ARN" \
+        SubscriptionCsvKey="$MONTHLY_SUBSCRIPTION_CSV_KEY" \
+        FeishuDevSecretArn="$MONTHLY_FEISHU_DEV_SECRET_ARN" \
+        FeishuProdSecretArn="$MONTHLY_FEISHU_PROD_SECRET_ARN" \
+        MonthlyOutputPrefix="$MONTHLY_OUTPUT_PREFIX" \
+        MonthlyProvisionalSchedule="$MONTHLY_PROVISIONAL_SCHEDULE" \
+        MonthlyFinalSchedule="$MONTHLY_FINAL_SCHEDULE" \
+        MonthlyFinalNotificationEnabled="$MONTHLY_FINAL_NOTIFICATION_ENABLED" \
+        MonthlyFinalNotificationChannel="$MONTHLY_FINAL_NOTIFICATION_CHANNEL" \
     --capabilities CAPABILITY_IAM \
     --region $REGION \
     --no-fail-on-empty-changeset
@@ -191,6 +255,21 @@ if [ -n "$LAMBDA_ROLE_FULL_ARN" ] && [ "$LAMBDA_ROLE_FULL_ARN" != "None" ]; then
         "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
         "CREATE_TABLE ALTER DESCRIBE" \
         "Lambda 数据库权限"
+fi
+
+MONTHLY_ROLE_NAME=$(aws cloudformation describe-stack-resource \
+    --stack-name "$STACK_NAME" --logical-resource-id MonthlyReportLambdaRole \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text --region "$REGION" 2>/dev/null || echo "")
+if [ -n "$MONTHLY_ROLE_NAME" ] && [ "$MONTHLY_ROLE_NAME" != "None" ]; then
+    MONTHLY_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${MONTHLY_ROLE_NAME}"
+    grant_lf "$MONTHLY_ROLE_ARN" \
+        "{\"Database\":{\"Name\":\"$GLUE_DB\"}}" \
+        "DESCRIBE" \
+        "月度报告 Lambda 数据库权限"
+    grant_lf "$MONTHLY_ROLE_ARN" \
+        "{\"Table\":{\"DatabaseName\":\"$GLUE_DB\",\"Name\":\"user_report\"}}" \
+        "SELECT DESCRIBE" \
+        "月度报告 Lambda user_report 读取权限"
 fi
 
 echo "✓ Lake Formation 数据库权限配置完成"

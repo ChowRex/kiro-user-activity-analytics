@@ -62,6 +62,26 @@ def get_display_name(user_id):
         return user_id
 
 
+def canonical_user_id(value):
+    value = (value or '').strip()
+    return value.split('.', 1)[1] if value.startswith('d-') and '.' in value else value
+
+
+def load_previous_names():
+    """保留已删除 IIC 用户最后一次有效姓名，避免每日全量覆盖丢失。"""
+    try:
+        body = s3.get_object(Bucket=bucket, Key=MAPPING_KEY)['Body'].read().decode('utf-8-sig')
+    except Exception:
+        return {}
+    result = {}
+    for row in csv.DictReader(io.StringIO(body)):
+        uid = canonical_user_id(row.get('userid'))
+        name = (row.get('username') or '').replace('\r', '').replace('\n', '').strip()
+        if uid and name and name != uid:
+            result[uid] = name
+    return result
+
+
 # ============================================
 # 1. 从两张表查出所有不重复的 userid（提取纯 UUID）
 # ============================================
@@ -94,6 +114,7 @@ print(f"  找到 {len(raw_userids)} 个不重复用户")
 print("2. 从 Identity Center 获取所有用户...")
 mapping = []
 iic_userids = set()
+previous_names = load_previous_names()
 
 # 拉取 IIC 全部用户
 paginator_token = None
@@ -106,6 +127,8 @@ while True:
         uid = user['UserId']
         name = user.get('DisplayName', '') or user.get('UserName', '') or uid
         name = name.replace('\r', '').replace('\n', '').strip()
+        if name == uid:
+            name = previous_names.get(uid, uid)
         iic_userids.add(uid)
         mapping.append((uid, name))
         mapping.append((f'{identity_store_id}.{uid}', name))
@@ -119,6 +142,8 @@ for raw_uid in sorted(raw_userids):
     clean_uid = raw_uid.strip('"').strip()
     if clean_uid and clean_uid not in iic_userids:
         name = get_display_name(clean_uid)
+        if name == clean_uid:
+            name = previous_names.get(clean_uid, clean_uid)
         mapping.append((clean_uid, name))
         mapping.append((f'{identity_store_id}.{clean_uid}', name))
         print(f"  {clean_uid} → {name} (仅在 Athena 中)")

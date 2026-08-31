@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-31
+
+### Added
+- **自然月 Kiro Credits 月报**：新增独立月报 Lambda，按订阅用户汇总 Credits、套餐容量、使用率、固定成本及连续低使用月份
+- **月度与年度 Excel**：生成月度明细、订阅快照、稳定别名和年度汇总工作簿，支持从 2026-02 开始同步回填
+- **双阶段调度**：每月 1 日生成静默暂定版，每月 2 日生成最终版；最终通知由显式开关和通道参数控制
+- **Feishu Card JSON 2.0**：响应式 KPI、风险折叠面板、浅色/深色企业配色、语义图标和完整报告按钮
+- **开发/生产通知隔离**：独立 Secrets Manager Secret，支持 `dev`、`prod`、`both` 显式通道；缺省不通知且生产通道不回退开发机器人
+- **历史身份回退**：从历史月报、用户映射和当前名册按身份字段合并姓名与邮箱，不使用当前名册补造历史订阅状态
+- **自动化回归测试**：覆盖月度边界、套餐优先级、Excel OOXML、身份合并、Card 2.0、容量限制和通知防误发逻辑
+
+### Changed
+- 用户映射同步保留已删除 Identity Center 用户最后一次有效姓名
+- 月报 Lambda 使用 SHA-256 地址化的不可变 S3 ZIP 制品部署，依赖固定为 `openpyxl==3.1.5` 和 `et-xmlfile==2.0.0`
+- Final EventBridge 规则显式传递 `notify` 与 `notification_channel`，Provisional 显式关闭通知
+
+### Fixed
+- 移除年度工作簿重复的 worksheet AutoFilter，避免 Excel 修复或删除筛选/视图记录
+- 修复重复用户 ID 覆盖有效姓名、跨风险组重名标识、低使用排序及首次低使用建议等边界问题
+- 风险用户超过 24 人时使用密集两行布局，保留全部用户并保持在 Card 2.0 的 200 组件限制内
+
 ## [1.3.0] - 2026-03-23
 
 ### Added

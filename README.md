@@ -492,3 +492,92 @@ AWS 提供两种订阅方式，根据账号所在区域和需求选择：
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+
+## 月度 Kiro Credits Excel 报告
+
+月报是独立的 Lambda（`kiro-monthly-credits-report`），不会替换或修改每日 QuickSight/PDF 报告。运行时为 Python 3.12，部署脚本按 `lambda/monthly_report/requirements.txt` 构建不可变 ZIP 并上传到数据桶的 `artifacts/monthly-report/<sha256>.zip`。
+
+### 调度与数据范围
+
+- 暂定版：每月 1 日 UTC 06:00（北京时间 14:00），生成上个自然月，不发飞书。
+- 最终版：每月 2 日 UTC 06:00，生成上个自然月，最终文件持久化后尽力发送飞书。
+- 查询仅使用 Athena `user_report`，按规范化用户 ID 汇总 Credits，使用 `[月初, 下月月初)` 半开区间和 `TRY` 转换。
+- 2026-02 标记为 `PARTIAL`，可用数据从 2026-02-10 开始。
+- 早于“当前上一个自然月”的历史回填不会把当前订阅快照中的零使用用户当作历史订阅；工作簿会明确警告历史名册无法重建。
+
+输出路径（报告桶公开前缀已由现有 bucket policy 允许）：
+
+```text
+dashboard-reports/public/kiro-monthly/YYYY/MM/kiro-credits-YYYY-MM-provisional.xlsx
+dashboard-reports/public/kiro-monthly/YYYY/MM/kiro-credits-YYYY-MM-final.xlsx
+dashboard-reports/public/kiro-monthly/YYYY/MM/kiro-credits-YYYY-MM.xlsx  # 最终稳定别名
+dashboard-reports/public/kiro-monthly/YYYY/MM/kiro-credits-YYYY-MM-detail.csv
+dashboard-reports/public/kiro-monthly/YYYY/MM/kiro-credits-YYYY-MM-subscriptions.csv
+dashboard-reports/public/kiro-monthly/YYYY/kiro-credits-YYYY.xlsx
+```
+
+年度工作簿每次从该年度全部月度 detail CSV 快照重建，不做增量追加。所有新对象使用 SSE-S3。
+
+### 订阅名册
+
+优先读取 `monthly_report.subscription_csv_key` 指向的**精确 S3 key**。文件必须为严格 UTF-8（可带 BOM），支持列别名：`userid/user_id`、`user_name/username/name`、`email`、`subscription_status/status`、`subscription_tier/kiro_plan/plan`、`activation_date`、`plan_source/source`。有效的仅表头空 CSV 也具有权威性。相同用户 ID 按最高套餐去重。
+
+精确 key 未配置或不存在时，Lambda 使用配置的 Kiro Application ARN 分页读取 Application Assignments，包含直接 USER，并展开 GROUP 成员。套餐组显示名支持 `Kiro-Pro-users`、`Kiro-Pro+-users`、Pro Max 和 Power 规范化；直接分配用户采用最近使用记录中的套餐，无记录时为 Unknown。
+
+套餐容量/价格：Pro `$20/1000`、Pro+ `$40/2000`、Pro Max `$100/5000`、Power `$200/10000`。红色为零使用或 `<10%`，黄色为 `10%-<50%`，绿色为 `>=50%`；`>=90%` 标记容量压力，`>=100%` 标记超过容量。
+
+### 飞书开发/生产 Secret 与主动通道
+
+Webhook 只能保存在 Secrets Manager，不能写入环境变量或配置文件。开发和生产分别使用独立 Secret：
+
+- `kiro/monthly-report/feishu-bot-dev`
+- `kiro/monthly-report/feishu-bot-prod`
+
+每个 Secret JSON 支持：
+
+```json
+{"webhook":"https://open.feishu.cn/open-apis/bot/v2/hook/REDACTED","sign_secret":"REDACTED"}
+```
+
+也可用 `url` 替代 `webhook`，`sign_secret` 可省略。`config.yaml` 只配置两个 Secret ARN，以及 Final 定时任务的主动开关和明确通道：
+
+```yaml
+monthly_report:
+  feishu_dev_secret_arn: "开发 Secret ARN"
+  feishu_prod_secret_arn: ""
+  final_notification_enabled: true
+  final_notification_channel: "dev"  # dev / prod / both
+```
+
+`notify` 只控制是否发送，`notification_channel` 只控制目标通道。事件未指定通道时始终默认 `dev`；选择 `prod` 或 `both` 时如果生产 Secret 未配置，会返回通道错误且绝不回退到开发机器人。`both` 会独立发送并分别返回结果。Lambda 日志和返回值不会包含 webhook 或密钥，发送失败也不会回滚已经写入 S3 的报告。
+
+### 手动执行与回填
+
+手动事件默认不通知。开发测试必须显式打开 `notify`，通道可省略（缺省为 `dev`）：
+
+```json
+{"month":"2026-03","report_type":"final","notify":true,"notification_channel":"dev"}
+```
+
+发送生产或双通道时必须显式指定 `"notification_channel":"prod"` 或 `"both"`。同步回填脚本默认从 2026-02 到最后一个已关闭自然月，逐月执行并在 Lambda `FunctionError` 时停止：
+
+```bash
+python3 scripts/backfill_monthly_reports.py
+python3 scripts/backfill_monthly_reports.py --start 2026-02 --end 2026-07
+python3 scripts/backfill_monthly_reports.py --include-current-partial
+# 仅明确需要时发送到开发机器人：
+python3 scripts/backfill_monthly_reports.py --start 2026-07 --end 2026-07 --notify --notification-channel dev
+# 生产通知必须显式指定：
+python3 scripts/backfill_monthly_reports.py --start 2026-07 --end 2026-07 --notify --notification-channel prod
+```
+
+部署不会自动回填。可通过 `--profile`/`--region` 指定 boto3 会话；正常部署继续支持导出的 `AWS_PROFILE`。
+
+### 月报本地验证
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m py_compile lambda/monthly_report/index.py scripts/backfill_monthly_reports.py
+bash -n deploy.sh
+```

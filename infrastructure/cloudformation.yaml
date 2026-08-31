@@ -5,10 +5,6 @@ Parameters:
   S3BucketName:
     Type: String
     Description: S3 bucket containing Kiro user activity reports
-  S3Prefix:
-    Type: String
-    Default: 'amazon-q-developer/'
-    Description: S3 prefix for reports
   GlueDatabaseName:
     Type: String
     Default: 'kiro_analytics'
@@ -30,6 +26,56 @@ Parameters:
   ReportBucket:
     Type: String
     Description: S3 bucket for dashboard report output (can differ from data bucket)
+  MonthlyArtifactBucket:
+    Type: String
+    Description: S3 bucket containing the immutable monthly Lambda ZIP
+  MonthlyArtifactKey:
+    Type: String
+    Description: S3 key of the immutable monthly Lambda ZIP
+  KiroApplicationArn:
+    Type: String
+    Default: ''
+    Description: Exact IAM Identity Center Kiro application ARN used for assignment resolution
+  SubscriptionCsvKey:
+    Type: String
+    Default: ''
+    Description: Optional exact S3 key in S3BucketName for the authoritative subscription roster CSV
+  FeishuDevSecretArn:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional development Feishu Secrets Manager ARN containing webhook/url and optional sign_secret
+  FeishuProdSecretArn:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional production Feishu Secrets Manager ARN containing webhook/url and optional sign_secret
+  MonthlyOutputPrefix:
+    Type: String
+    Default: dashboard-reports/public/kiro-monthly
+    Description: Public S3 prefix for monthly credits reports
+  MonthlyProvisionalSchedule:
+    Type: String
+    Default: 'cron(0 6 1 * ? *)'
+    Description: Provisional monthly report schedule (UTC 06:00 on day 1)
+  MonthlyFinalSchedule:
+    Type: String
+    Default: 'cron(0 6 2 * ? *)'
+    Description: Final monthly report schedule (UTC 06:00 on day 2)
+  MonthlyFinalNotificationEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Explicit switch controlling whether the final schedule sends a Feishu notification
+  MonthlyFinalNotificationChannel:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod, both]
+    Description: Explicit Feishu channel used by the final schedule
+
+Conditions:
+  HasFeishuDevSecret: !Not [!Equals [!Ref FeishuDevSecretArn, '']]
+  HasFeishuProdSecret: !Not [!Equals [!Ref FeishuProdSecretArn, '']]
 
 Resources:
   # Glue Database
@@ -194,6 +240,23 @@ Resources:
                   return name.replace('\r', '').replace('\n', '').strip()
               except: return uid
 
+          def canonical_uid(value):
+              value = (value or '').strip()
+              return value.split('.', 1)[1] if value.startswith('d-') and '.' in value else value
+
+          def load_previous_names():
+              try:
+                  body = s3.get_object(Bucket=BUCKET, Key=MAPPING_KEY)['Body'].read().decode('utf-8-sig')
+              except Exception:
+                  return {}
+              result = {}
+              for row in csv.DictReader(io.StringIO(body)):
+                  uid = canonical_uid(row.get('userid'))
+                  name = (row.get('username') or '').replace('\r', '').replace('\n', '').strip()
+                  if uid and name and name != uid:
+                      result[uid] = name
+              return result
+
           def ensure_table():
               ti = {
                   'Name': 'user_mapping',
@@ -233,6 +296,7 @@ Resources:
               # 从 IIC 获取全部用户
               mapping = []
               iic_ids = set()
+              previous_names = load_previous_names()
               paginator_token = None
               while True:
                   kwargs = {'IdentityStoreId': ID_STORE}
@@ -242,6 +306,8 @@ Resources:
                       uid = u['UserId']
                       name = u.get('DisplayName','') or u.get('UserName','') or uid
                       name = name.replace('\r','').replace('\n','').strip()
+                      if name == uid:
+                          name = previous_names.get(uid, uid)
                       iic_ids.add(uid)
                       mapping.append((uid, name))
                       mapping.append((f'{ID_STORE}.{uid}', name))
@@ -251,8 +317,11 @@ Resources:
               for raw in sorted(raw_ids):
                   clean = raw.strip('"').strip()
                   if clean and clean not in iic_ids:
-                      mapping.append((clean, get_name(clean)))
-                      mapping.append((f'{ID_STORE}.{clean}', get_name(clean)))
+                      name = get_name(clean)
+                      if name == clean:
+                          name = previous_names.get(clean, clean)
+                      mapping.append((clean, name))
+                      mapping.append((f'{ID_STORE}.{clean}', name))
               buf = io.StringIO(newline='')
               w = csv.writer(buf, lineterminator='\n')
               w.writerow(['userid','username'])
@@ -313,13 +382,11 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                  - s3:CopyObject
                 Resource:
                   - !Sub 'arn:aws:s3:::${ReportBucket}/dashboard-reports/*'
               - Effect: Allow
                 Action:
                   - ses:SendEmail
-                  - sesv2:SendEmail
                 Resource: '*'
 
   DashboardReportFunction:
@@ -479,6 +546,180 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub 'arn:aws:s3:::${ReportBucket}/dashboard-reports/public/*'
 
+  # ============================================
+  # Monthly Kiro credits Excel reports (additive)
+  # ============================================
+  MonthlyReportLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MonthlyReportPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                  - athena:GetWorkGroup
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}'
+                  - !Sub 'arn:aws:s3:::${ReportBucket}'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+                  - !Sub 'arn:aws:s3:::${ReportBucket}/${MonthlyOutputPrefix}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/athena-results/*'
+                  - !Sub 'arn:aws:s3:::${ReportBucket}/${MonthlyOutputPrefix}/*'
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                  - glue:BatchGetPartition
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${GlueDatabaseName}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${GlueDatabaseName}/user_report'
+              - Effect: Allow
+                Action: lakeformation:GetDataAccess
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sso:ListApplicationAssignments
+                  - sso:DescribeApplicationAssignment
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - identitystore:DescribeUser
+                  - identitystore:DescribeGroup
+                  - identitystore:ListGroupMemberships
+                Resource: '*'
+              - !If
+                - HasFeishuDevSecret
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref FeishuDevSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasFeishuProdSecret
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref FeishuProdSecretArn
+                - !Ref AWS::NoValue
+
+  MonthlyReportFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: kiro-monthly-credits-report
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt MonthlyReportLambdaRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      EphemeralStorage:
+        Size: 1024
+      ReservedConcurrentExecutions: 1
+      Code:
+        S3Bucket: !Ref MonthlyArtifactBucket
+        S3Key: !Ref MonthlyArtifactKey
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref S3BucketName
+          REPORT_BUCKET: !Ref ReportBucket
+          GLUE_DATABASE: !Ref GlueDatabaseName
+          ATHENA_WORKGROUP: !Ref AthenaWorkgroup
+          IDENTITY_STORE_ID: !Ref IdentityStoreId
+          KIRO_APPLICATION_ARN: !Ref KiroApplicationArn
+          SUBSCRIPTION_CSV_KEY: !Ref SubscriptionCsvKey
+          FEISHU_DEV_SECRET_ARN: !Ref FeishuDevSecretArn
+          FEISHU_PROD_SECRET_ARN: !Ref FeishuProdSecretArn
+          MONTHLY_OUTPUT_PREFIX: !Ref MonthlyOutputPrefix
+          AWS_REGION_NAME: !Ref AWS::Region
+
+  MonthlyReportLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${MonthlyReportFunction}'
+      RetentionInDays: 90
+
+  MonthlyProvisionalScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: kiro-monthly-credits-provisional
+      Description: Provisional prior-month credits report, no notification
+      ScheduleExpression: !Ref MonthlyProvisionalSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt MonthlyReportFunction.Arn
+          Id: MonthlyProvisionalTarget
+          InputTransformer:
+            InputPathsMap:
+              eventTime: $.time
+            InputTemplate: '{"time": <eventTime>, "report_type": "provisional", "notify": false}'
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 86400
+            MaximumRetryAttempts: 2
+
+  MonthlyFinalScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: kiro-monthly-credits-final
+      Description: Final prior-month credits report with best-effort Feishu notification
+      ScheduleExpression: !Ref MonthlyFinalSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt MonthlyReportFunction.Arn
+          Id: MonthlyFinalTarget
+          InputTransformer:
+            InputPathsMap:
+              eventTime: $.time
+            InputTemplate: !Sub '{"time": <eventTime>, "report_type": "final", "notify": ${MonthlyFinalNotificationEnabled}, "notification_channel": "${MonthlyFinalNotificationChannel}"}'
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 86400
+            MaximumRetryAttempts: 2
+
+  MonthlyProvisionalLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MonthlyReportFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MonthlyProvisionalScheduleRule.Arn
+
+  MonthlyFinalLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MonthlyReportFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MonthlyFinalScheduleRule.Arn
+
 Outputs:
   GlueDatabaseName:
     Value: !Ref GlueDatabase
@@ -499,6 +740,16 @@ Outputs:
     Value: !GetAtt DashboardReportFunction.Arn
     Export:
       Name: KiroDashboardReportFunction
+
+  MonthlyReportFunctionArn:
+    Value: !GetAtt MonthlyReportFunction.Arn
+    Export:
+      Name: KiroMonthlyReportFunction
+
+  MonthlyReportRoleArn:
+    Value: !GetAtt MonthlyReportLambdaRole.Arn
+    Export:
+      Name: KiroMonthlyReportRole
 
   DashboardReportUrl:
     Value: !Sub 'http://${ReportBucket}.s3-website-${AWS::Region}.amazonaws.com/dashboard-reports/public/index.html'
