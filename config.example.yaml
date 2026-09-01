@@ -40,13 +40,14 @@ monthly_report:
   kiro_application_arn: "arn:aws:sso::YOUR_ACCOUNT_ID:application/ssoins-xxxxxxxxxxxxxxxx/apl-xxxxxxxxxxxxxxxx"
   # 可选：数据桶中的精确 CSV key；有效空 CSV 也视为权威快照，不回退 IIC
   subscription_csv_key: ""
-  # 可选：开发/生产 Feishu Secrets Manager ARN。Secret JSON: {"webhook":"https://...","sign_secret":"..."}
-  # 不要把 webhook 或签名密钥放入此配置文件；未指定事件通道时始终默认 dev
+  # 可选：开发/生产 Feishu Secrets Manager ARN；Secret 由运维创建，CloudFormation 不创建
+  # Secret JSON: {"webhook":"https://...","sign_secret":"..."}；不要把 SecretString 写入配置/Git
   feishu_dev_secret_arn: ""
   feishu_prod_secret_arn: ""
-  # Final 定时任务也由主动开关和显式通道控制；通道支持 dev / prod / both
-  final_notification_enabled: true
+  # 安全默认关闭。启用时所选通道 ARN 必填；通道支持 dev / prod / both
+  # 生产示例：final_notification_enabled: true + final_notification_channel: "prod"
+  final_notification_enabled: false
   final_notification_channel: "dev"
   output_prefix: "dashboard-reports/public/kiro-monthly"
   provisional_schedule: "cron(0 6 1 * ? *)"  # 每月 1 日 UTC 06:00，不通知
-  final_schedule: "cron(0 6 2 * ? *)"        # 每月 2 日 UTC 06:00，飞书通知
+  final_schedule: "cron(0 6 2 * ? *)"        # 每月 2 日 UTC 06:00；是否通知由上方开关控制
