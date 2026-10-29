@@ -450,6 +450,36 @@ GROUP BY userid;
    - 早期 PRO 层级的 credit 数值可能异常偏大
    - 升级到 PRO_PLUS 后数据正常
 
+## 即时 Kiro Credits 用量巡检
+
+需要临时检查订阅浪费时，可使用标准库 CLI 直接查询 Athena 和当前订阅名册：
+
+```bash
+# 默认：上海时区当前自然月、所有当前订阅用户、零使用/低使用优先
+python3 scripts/list_current_credit_usage.py
+
+# 只看零使用，或查看零使用 + 非零低使用（<10%）
+python3 scripts/list_current_credit_usage.py --risk zero
+python3 scripts/list_current_credit_usage.py --risk all
+
+# 过滤套餐并调整排序
+python3 scripts/list_current_credit_usage.py --tier 'Pro+' --sort cost
+python3 scripts/list_current_credit_usage.py --sort last-active
+
+# 机器可读输出；CSV 的数据说明写入 stderr，不会污染重定向文件
+python3 scripts/list_current_credit_usage.py --format json
+python3 scripts/list_current_credit_usage.py --format csv > /tmp/kiro-usage.csv
+
+# 显式指定历史月份、AWS profile 或 Region
+python3 scripts/list_current_credit_usage.py --month 2026-09 --profile your-aws-profile --region us-east-1
+```
+
+默认表格包含用户、邮箱、套餐、Credits/容量、使用率、最后活跃日、活跃天数、状态、月成本和套餐来源。状态口径为：零使用、非零低使用 `<10%`、中使用 `10%-<50%`、正常 `>=50%`；套餐容量未知时使用率和月成本显示 `N/A`，汇总单列成本未知人数，不把未知套餐误判为免费或可计算的低使用。`--risk low` 仅显示非零低使用，`--risk all` 表示零使用与低使用两类风险；不传 `--risk` 才显示全部当前订阅用户。
+
+工具只使用 Python 标准库和已安装的 AWS CLI v2，读取根目录 `config.yaml` 中本项目既有的两层标量配置；不支持 YAML anchor、嵌套列表等扩展语法。若未显式传入 `--profile`，依次使用配置中的 `aws.profile`、`AWS_PROFILE`/默认凭证链；若 AWS profile 恰好与 `aws.account_id` 同名，则会自动选择它。终端 TTY 默认使用 ANSI 红/黄/绿状态色，`--no-color` 可关闭；CSV/JSON 永远不含 ANSI 控制码。
+
+数据流程与月中简报保持一致：先查询目标月实际 `MAX(date)`，再将累计 Credits 和直接 USER 的套餐回退锁定到同一截止日；权威订阅 CSV 优先，其次是当前可识别的 IIC 套餐组，IIC 直接分配或无法识别的组使用截止日内最新套餐。权威 CSV 会排除明确的取消、停用、过期、撤销等状态，无法识别的新状态会报错而非静默纳入。输出会明确实际数据截止日和 1–2 天源数据延迟；若本月尚无任何报告，仍列出当前名册，但将 cutoff 输出为 `null`/“本月暂无可用数据”，并明确提示零值不能证明用户实际未使用。该命令不调用 Lambda、Feishu 或 Secrets Manager，不生成月报，也不执行 S3 Put/Delete；但 Athena 按 WorkGroup 配置正常写入查询结果文件，仍会产生少量 Athena/S3 查询费用。
+
 ## 成本估算
 
 本方案使用的 AWS 服务均为按量付费或有免费额度，适合中小团队低成本运行。

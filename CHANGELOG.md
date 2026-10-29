@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-28
+
+### Added
+- 新增本地只读 `list_current_credit_usage.py`，按实际数据截止日列出全部当前订阅用户的月累计 Credits、利用率、状态、成本和套餐来源
+- 支持风险/套餐筛选、四种排序、ANSI 状态色，以及纯净的 table/CSV/JSON 输出；仅依赖 Python 标准库和 AWS CLI v2
+
 ## [1.5.0] - 2026-09-10
 
 ### Added
